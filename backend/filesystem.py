@@ -79,22 +79,22 @@ class FileSystem:
         return n
 
     def scan_dataset(self, root: str) -> List[dict]:
-        """Detect kohya-style sub-folders: `<repeats>_<concept>`."""
+        """Scan all sub-folders in root as dataset subsets.
+
+        Repeats are NOT inferred from folder names — they come from UI settings.
+        Any folder name is valid (no `N_concept` naming required).
+        """
         target = _safe_resolve(root, self.roots)
         if target is None or not target.is_dir():
             return []
         out = []
-        pat = re.compile(r"^(\d+)_(.+)$")
         for child in sorted(target.iterdir()):
             if not child.is_dir():
                 continue
-            m = pat.match(child.name)
-            repeats = int(m.group(1)) if m else 1
-            concept = m.group(2) if m else child.name
             out.append({
                 "image_dir": str(child),
-                "num_repeats": repeats,
-                "concept": concept,
+                "num_repeats": 1,   # default — user sets real value in UI
+                "concept": child.name,
                 "num_images": self.count_images(str(child)),
             })
         return out
