@@ -1,0 +1,184 @@
+"""Trainer subprocess manager.
+
+Spawns accelerate-launched sd-scripts, streams stdout/stderr to subscribers
+(WebSocket clients), parses progress lines, and lets the UI stop the run.
+"""
+from __future__ import annotations
+
+import asyncio
+import os
+import re
+import signal
+import time
+from pathlib import Path
+from typing import Optional, List, Callable, Awaitable
+
+from .schemas import TrainConfig, TrainStatus
+from .config_builder import build_command, compute_total_steps
+
+
+# kohya/tqdm progress lines look like:
+#   "steps:   3%|▎         | 12/400 [00:34<18:30,  2.86s/it, avr_loss=0.123, lr=1.0e-4]"
+PROGRESS_RX = re.compile(
+    r"steps:\s+\d+%\|[^|]*\|\s+(?P<step>\d+)/(?P<total>\d+)"
+    r"(?:.*?avr_loss=(?P<loss>[0-9.eE+\-]+))?"
+    r"(?:.*?lr=(?P<lr>[0-9.eE+\-]+))?",
+    re.IGNORECASE,
+)
+EPOCH_RX = re.compile(r"epoch\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+SAVE_RX = re.compile(r"saving checkpoint:.*?epoch[_-]?(\d+)", re.IGNORECASE)
+
+
+class Trainer:
+    def __init__(self):
+        self.proc: Optional[asyncio.subprocess.Process] = None
+        self.status = TrainStatus()
+        self._log_subs: List[Callable[[dict], Awaitable[None]]] = []
+        self._log_buffer: List[dict] = []
+        self._log_buffer_max = 5000
+        self._tail_task: Optional[asyncio.Task] = None
+        self._workdir: Optional[Path] = None
+        self._argv: Optional[List[str]] = None
+
+    # --- pub/sub --------------------------------------------------------
+    def subscribe(self, fn: Callable[[dict], Awaitable[None]]) -> None:
+        self._log_subs.append(fn)
+
+    def unsubscribe(self, fn: Callable[[dict], Awaitable[None]]) -> None:
+        try:
+            self._log_subs.remove(fn)
+        except ValueError:
+            pass
+
+    async def _broadcast(self, event: dict) -> None:
+        event = {"ts": time.time(), **event}
+        self._log_buffer.append(event)
+        if len(self._log_buffer) > self._log_buffer_max:
+            self._log_buffer = self._log_buffer[-self._log_buffer_max:]
+        for fn in list(self._log_subs):
+            try:
+                await fn(event)
+            except Exception:
+                pass
+
+    def snapshot(self) -> dict:
+        return {
+            "status": self.status.model_dump(),
+            "tail": self._log_buffer[-300:],
+            "argv": self._argv,
+        }
+
+    # --- lifecycle ------------------------------------------------------
+    def is_running(self) -> bool:
+        return self.proc is not None and self.proc.returncode is None
+
+    async def start(self, cfg: TrainConfig, workdir: Path) -> None:
+        if self.is_running():
+            raise RuntimeError("Training already in progress")
+
+        self._workdir = workdir
+        argv, env = build_command(cfg, workdir)
+        self._argv = argv
+
+        self.status = TrainStatus(
+            state="starting",
+            total_epochs=cfg.training.max_train_epochs,
+            total_steps=compute_total_steps(cfg),
+            started_at=time.time(),
+        )
+        await self._broadcast({"type": "status", "status": self.status.model_dump()})
+        await self._broadcast({"type": "log", "stream": "system", "line": "$ " + " ".join(argv)})
+
+        try:
+            self.proc = await asyncio.create_subprocess_exec(
+                *argv,
+                cwd=cfg.paths.sd_scripts_dir,
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        except FileNotFoundError as e:
+            self.status.state = "error"
+            self.status.message = f"Cannot launch: {e}"
+            await self._broadcast({"type": "status", "status": self.status.model_dump()})
+            raise
+
+        self.status.pid = self.proc.pid
+        self.status.state = "running"
+        await self._broadcast({"type": "status", "status": self.status.model_dump()})
+
+        self._tail_task = asyncio.create_task(self._tail())
+
+    async def _tail(self) -> None:
+        assert self.proc is not None and self.proc.stdout is not None
+        try:
+            async for raw in self.proc.stdout:
+                line = raw.decode("utf-8", errors="replace").rstrip("\n")
+                self._parse_line(line)
+                await self._broadcast({"type": "log", "stream": "stdout", "line": line})
+        except Exception as e:
+            await self._broadcast({"type": "log", "stream": "system", "line": f"[tail error] {e}"})
+
+        rc = await self.proc.wait()
+        if rc == 0:
+            self.status.state = "finished"
+            self.status.message = "Training finished"
+        elif self.status.state == "stopping":
+            self.status.state = "finished"
+            self.status.message = "Stopped by user"
+        else:
+            self.status.state = "error"
+            self.status.message = f"Process exited with code {rc}"
+        await self._broadcast({"type": "status", "status": self.status.model_dump()})
+
+    def _parse_line(self, line: str) -> None:
+        m = PROGRESS_RX.search(line)
+        if m:
+            try:
+                self.status.step = int(m.group("step"))
+                self.status.total_steps = int(m.group("total"))
+                if m.group("loss"):
+                    self.status.loss = float(m.group("loss"))
+                if m.group("lr"):
+                    self.status.lr = float(m.group("lr"))
+                started = self.status.started_at or time.time()
+                elapsed = max(1.0, time.time() - started)
+                if self.status.step > 0:
+                    per_step = elapsed / self.status.step
+                    remaining = max(0, self.status.total_steps - self.status.step)
+                    self.status.eta_seconds = int(per_step * remaining)
+            except (ValueError, TypeError):
+                pass
+            return
+        me = EPOCH_RX.search(line)
+        if me:
+            try:
+                self.status.epoch = int(me.group(1))
+                self.status.total_epochs = int(me.group(2))
+            except ValueError:
+                pass
+
+    async def stop(self) -> None:
+        if not self.is_running():
+            return
+        self.status.state = "stopping"
+        await self._broadcast({"type": "status", "status": self.status.model_dump()})
+        assert self.proc is not None
+        try:
+            self.proc.send_signal(signal.SIGINT)
+        except ProcessLookupError:
+            return
+        try:
+            await asyncio.wait_for(self.proc.wait(), timeout=20)
+        except asyncio.TimeoutError:
+            try:
+                self.proc.terminate()
+                await asyncio.wait_for(self.proc.wait(), timeout=10)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                try:
+                    self.proc.kill()
+                except ProcessLookupError:
+                    pass
+
+    def clear_logs(self) -> None:
+        self._log_buffer.clear()
