@@ -69,6 +69,39 @@ function fmtDuration(s) {
     return `${sec}с`;
 }
 
+// Strip arch-irrelevant fields from a config for clean export / display.
+// SDXL configs shouldn't carry FlowMatch fields or anima_* paths; Anima
+// configs shouldn't carry SDXL noise/loss fields, vae, or clip_skip.
+function cleanForExport(cfg) {
+    const c = JSON.parse(JSON.stringify(cfg));
+    const isAnima = c.model?.arch === 'anima';
+    if (isAnima) {
+        // SDXL-only model fields
+        delete c.model.vae;
+        delete c.model.v_parameterization;
+        delete c.model.clip_skip;
+        // SDXL-only training noise/loss fields
+        const tdel = [
+            'min_snr_gamma', 'noise_offset', 'adaptive_noise_scale',
+            'multires_noise_iterations', 'multires_noise_discount',
+            'ip_noise_gamma', 'debiased_estimation_loss', 'zero_terminal_snr',
+        ];
+        tdel.forEach(k => delete c.training[k]);
+    } else {
+        // Anima-only model fields
+        delete c.model.anima_qwen3;
+        delete c.model.anima_t5_tokenizer_path;
+        delete c.model.anima_vae;
+        // Anima FlowMatch training fields
+        const fdel = [
+            'weighting_scheme', 'logit_mean', 'logit_std', 'mode_scale',
+            'timestep_sampling', 'sigmoid_scale', 'discrete_flow_shift',
+        ];
+        fdel.forEach(k => delete c.training[k]);
+    }
+    return c;
+}
+
 function computeTotalStepsLocal(cfg) {
     const subs = cfg.dataset?.subsets || [];
     if (subs.length === 0) return 0;
@@ -521,10 +554,15 @@ const SectionTraining = ({ cfg, set, val }) => {
                 </${Field}>
             </div>
             <${Field} label="optimizer_args" tipKey="optimizer.optimizer_args" columns="stack">
-                <textarea placeholder="weight_decay=0.1&#10;betas=0.9,0.999"
+                <textarea placeholder=${"weight_decay=0.1\nbetas=0.9,0.999"}
                     value=${(cfg.optimizer.optimizer_args || []).join('\n')}
                     onInput=${e => set('optimizer.optimizer_args',
-                        e.target.value.split('\n').map(s => s.trim()).filter(Boolean))}></textarea>
+                        // split on real newlines or HTML-encoded newlines users may have pasted
+                        e.target.value
+                            .replace(/&#10;|&#xA;/gi, '\n')
+                            .split(/\n+/)
+                            .map(s => s.trim())
+                            .filter(Boolean))}></textarea>
             </${Field}>
         </div>
 
@@ -863,7 +901,7 @@ const SectionPresets = ({ cfg, applyPatch, replaceCfg, presets, refresh }) => {
     const onSave = async () => {
         if (!name.trim()) { toast('warn', 'Введите имя пресета'); return; }
         try {
-            await api.presetsSave({ name: name.trim(), description: desc.trim(), config: cfg });
+            await api.presetsSave({ name: name.trim(), description: desc.trim(), config: cleanForExport(cfg) });
             await refresh();
             toast('ok', 'Пресет сохранён');
             setName(''); setDesc('');
@@ -871,7 +909,8 @@ const SectionPresets = ({ cfg, applyPatch, replaceCfg, presets, refresh }) => {
     };
 
     const onExport = () => {
-        const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
+        const cleaned = cleanForExport(cfg);
+        const blob = new Blob([JSON.stringify(cleaned, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

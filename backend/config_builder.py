@@ -187,10 +187,19 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
         argv.append("--cache_latents")
     if cfg.dataset.cache_latents_to_disk:
         argv.append("--cache_latents_to_disk")
-    if cfg.dataset.cache_text_encoder_outputs:
+    # cache_text_encoder_outputs is incompatible with shuffle_caption=True
+    # AND with training the TE — silently drop it in those cases to avoid
+    # the kohya assertion at startup.
+    _any_shuffle = any(s.shuffle_caption for s in cfg.dataset.subsets)
+    _trains_te = (
+        not cfg.network.network_train_unet_only
+        and (cfg.optimizer.text_encoder_lr is None or cfg.optimizer.text_encoder_lr > 0)
+    )
+    _cache_te_ok = cfg.dataset.cache_text_encoder_outputs and not _any_shuffle and not _trains_te
+    if _cache_te_ok:
         argv.append("--cache_text_encoder_outputs")
-    if cfg.dataset.cache_text_encoder_outputs_to_disk:
-        argv.append("--cache_text_encoder_outputs_to_disk")
+        if cfg.dataset.cache_text_encoder_outputs_to_disk:
+            argv.append("--cache_text_encoder_outputs_to_disk")
     add("max_token_length", cfg.dataset.max_token_length)
     if cfg.dataset.color_aug:
         argv.append("--color_aug")

@@ -10,7 +10,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +25,16 @@ from .config_builder import compute_total_steps, build_command
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = ROOT / "frontend"
+
+
+# Defined at module scope so FastAPI's dependency-resolver can introspect it
+# reliably (a class nested inside a factory function makes FastAPI confused
+# and it falls back to treating the param as a query scalar → 422
+# `loc=["query","p"]` on POST /api/presets).
+class SavePresetIn(BaseModel):
+    name: str
+    description: str = ""
+    config: TrainConfig
 
 
 def _read_env_paths() -> dict:
@@ -163,13 +173,8 @@ def make_app() -> FastAPI:
     def api_presets_list():
         return [p.model_dump() for p in state.list_presets()]
 
-    class SavePresetIn(BaseModel):
-        name: str
-        description: str = ""
-        config: TrainConfig
-
     @app.post("/api/presets")
-    def api_presets_save(p: SavePresetIn):
+    def api_presets_save(p: SavePresetIn = Body(...)):
         saved = state.save_preset(p.name, p.description, p.config)
         return saved.model_dump()
 

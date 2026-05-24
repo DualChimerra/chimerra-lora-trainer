@@ -69,8 +69,10 @@ class DatasetSection(BaseModel):
     bucket_no_upscale: bool = False
     cache_latents: bool = True
     cache_latents_to_disk: bool = True
-    cache_text_encoder_outputs: bool = True
-    cache_text_encoder_outputs_to_disk: bool = True
+    # ⚠️ Cannot be True together with shuffle_caption=True or training the
+    # text encoder (text_encoder_lr set / not network_train_unet_only).
+    cache_text_encoder_outputs: bool = False
+    cache_text_encoder_outputs_to_disk: bool = False
     color_aug: bool = False
     flip_aug: bool = False
     random_crop: bool = False
