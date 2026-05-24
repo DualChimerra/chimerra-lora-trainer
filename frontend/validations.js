@@ -42,6 +42,25 @@ export function validate(cfg) {
         W.push({ path: 'dataset.resolution', message: 'SDXL обучается заметно хуже на разрешении ниже 1024' });
     }
 
+    // cache_text_encoder_outputs incompatibilities (kohya assertion at startup)
+    if (cfg.dataset.cache_text_encoder_outputs) {
+        const anyShuffle = (cfg.dataset.subsets || []).some(s => s.shuffle_caption);
+        const trainsTE = !cfg.network.network_train_unet_only
+            && (cfg.optimizer.text_encoder_lr == null || cfg.optimizer.text_encoder_lr > 0);
+        if (anyShuffle) {
+            E.push({
+                path: 'dataset.cache_text_encoder_outputs',
+                message: 'cache_text_encoder_outputs несовместим с shuffle_caption — выключите одно из двух',
+            });
+        }
+        if (trainsTE) {
+            E.push({
+                path: 'dataset.cache_text_encoder_outputs',
+                message: 'cache_text_encoder_outputs нельзя при обучении text encoder (text_encoder_lr / не unet-only)',
+            });
+        }
+    }
+
     // network — главное правило: alpha ≤ dim для обычной LoRA
     const n = cfg.network;
     if (n.kind === 'lora' && n.network_alpha > n.network_dim) {
