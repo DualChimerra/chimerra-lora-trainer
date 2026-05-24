@@ -106,17 +106,33 @@ const Text = ({ value, onInput, placeholder, warn, err }) => html`
         onInput=${e => onInput(e.target.value)} />
 `;
 
-const Num = ({ value, onInput, step = 1, min, max, warn, err }) => html`
-    <input type="number" step=${step} min=${min} max=${max}
-        class=${err ? 'err' : warn ? 'warn' : ''}
-        value=${value ?? ''}
-        onInput=${e => {
-            const v = e.target.value;
-            if (v === '') return onInput(null);
-            const parsed = step < 1 ? parseFloat(v) : parseInt(v, 10);
-            if (!isNaN(parsed)) onInput(parsed);
-        }} />
-`;
+const Num = ({ value, onInput, step = 1, min, max, warn, err }) => {
+    const [buf, setBuf] = useState(value == null ? '' : String(value));
+    const focused = useRef(false);
+    useEffect(() => {
+        if (!focused.current) setBuf(value == null ? '' : String(value));
+    }, [value]);
+    const commit = (v, finalize) => {
+        setBuf(v);
+        if (v === '' || v === '-' || v === '.' || v === '-.') {
+            if (finalize) {
+                onInput(null);
+                if (value != null) setBuf(String(value));
+            }
+            return;
+        }
+        const parsed = step < 1 ? parseFloat(v) : parseInt(v, 10);
+        if (!isNaN(parsed)) onInput(parsed);
+    };
+    return html`
+        <input type="number" step=${step} min=${min} max=${max}
+            class=${'num ' + (err ? 'err' : warn ? 'warn' : '')}
+            value=${buf}
+            onFocus=${() => { focused.current = true; }}
+            onBlur=${e => { focused.current = false; commit(e.target.value, true); }}
+            onInput=${e => commit(e.target.value, false)} />
+    `;
+};
 
 const Select = ({ value, onInput, options, warn, err }) => html`
     <select class=${err ? 'err' : warn ? 'warn' : ''} value=${value} onChange=${e => onInput(e.target.value)}>

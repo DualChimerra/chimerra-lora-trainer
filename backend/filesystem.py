@@ -77,10 +77,14 @@ class FileSystem:
         return n
 
     def scan_dataset(self, root: str) -> List[dict]:
-        """Scan all sub-folders in root as dataset subsets.
+        """Scan dataset root for image subsets.
 
-        Repeats are NOT inferred from folder names — they come from UI settings.
+        Supports two layouts:
+        1. Root contains sub-folders, each with images (kohya-style).
+        2. Root contains images directly — treat root itself as a single subset.
+
         Any folder name is valid (no `N_concept` naming required).
+        Repeats are NOT inferred from folder names — they come from UI settings.
         """
         target = _safe_resolve(root, self.roots)
         if target is None or not target.is_dir():
@@ -89,12 +93,25 @@ class FileSystem:
         for child in sorted(target.iterdir()):
             if not child.is_dir():
                 continue
+            n = self.count_images(str(child))
+            if n == 0:
+                continue
             out.append({
                 "image_dir": str(child),
-                "num_repeats": 1,   # default — user sets real value in UI
+                "num_repeats": 1,
                 "concept": child.name,
-                "num_images": self.count_images(str(child)),
+                "num_images": n,
             })
+        # If no subdirs with images, but root has images directly — use the root.
+        if not out:
+            root_imgs = self.count_images(str(target))
+            if root_imgs > 0:
+                out.append({
+                    "image_dir": str(target),
+                    "num_repeats": 1,
+                    "concept": target.name,
+                    "num_images": root_imgs,
+                })
         return out
 
     def list_models(self, root: str) -> List[FsEntry]:

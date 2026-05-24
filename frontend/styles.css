@@ -257,9 +257,26 @@ button { font-family: inherit; }
     border-radius: var(--r-2);
 }
 
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
-.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px 14px; }
-.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px 14px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px 14px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 14px; }
+.grid-2 + .grid-2, .grid-3 + .grid-3, .grid-4 + .grid-4 { margin-top: 4px; }
+
+/* Inside grids, stack labels above inputs so columns don't get cramped. */
+.grid-2 > .row,
+.grid-3 > .row,
+.grid-4 > .row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 0;
+}
+.grid-2 > .row > .field-label,
+.grid-3 > .row > .field-label,
+.grid-4 > .row > .field-label {
+    font-size: 11px;
+    color: var(--text-dimmer);
+    letter-spacing: 0.005em;
+}
 
 /* ============================================================
    Inputs
@@ -296,17 +313,30 @@ input.err, select.err, textarea.err {
     background: rgba(242, 100, 100, 0.05);
 }
 input::placeholder, textarea::placeholder { color: var(--text-mute); }
-input[type="number"]::-webkit-inner-spin-button { opacity: 0.3; }
+
+/* hide ugly native number spinners — Chrome/Safari/Firefox */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+}
+input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
 
 select {
     appearance: none;
-    background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
-                      linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
-    background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
-    background-size: 5px 5px;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%23A2A8B5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
+    background-position: right 10px center;
     background-repeat: no-repeat;
-    padding-right: 24px;
+    background-size: 10px 6px;
+    padding-right: 26px;
+    cursor: pointer;
 }
+select:hover { background-color: var(--bg-3); }
 
 textarea {
     min-height: 64px;
@@ -534,11 +564,13 @@ textarea {
 
 .dataset-row {
     display: grid;
-    grid-template-columns: 64px 1fr 90px 90px 28px;
+    grid-template-columns: 70px minmax(0, 1fr) 80px 90px 28px;
     gap: 8px;
     align-items: center;
     padding: 4px 0;
 }
+.dataset-row input { padding: 4px 8px; }
+.dataset-row > button { padding: 4px 6px; }
 
 /* ============================================================
    Sample gallery grid
