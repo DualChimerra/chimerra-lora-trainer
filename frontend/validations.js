@@ -22,11 +22,11 @@ export function validate(cfg) {
 
     // dataset
     if (!cfg.dataset.subsets || cfg.dataset.subsets.length === 0) {
-        E.push({ path: 'dataset.subsets', message: 'Добавьте хотя бы одну подпапку с изображениями' });
+        E.push({ path: 'dataset.subsets', message: 'Нажмите «↻ Пересканировать папку» или добавьте папку вручную кнопкой «+ Добавить»' });
     } else {
         const total = cfg.dataset.subsets.reduce((s, x) => s + (x.num_images || 0) * (x.num_repeats || 0), 0);
         if (total === 0) {
-            E.push({ path: 'dataset.subsets', message: 'Подпапки пусты — изображения не найдены' });
+            E.push({ path: 'dataset.subsets', message: 'В папках не найдено картинок (.png / .jpg / .webp)' });
         }
         cfg.dataset.subsets.forEach((s, i) => {
             if (s.num_repeats < 1)

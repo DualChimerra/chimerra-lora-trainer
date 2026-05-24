@@ -25,7 +25,7 @@ class FsEntry:
 
 
 def _safe_resolve(target: str, roots: List[str]) -> Optional[Path]:
-    """Resolve `target` and verify it lives inside one of the allow-listed roots."""
+    """Resolve `target` and verify it is equal to or lives inside one of the allow-listed roots."""
     if not target:
         return None
     p = Path(target).expanduser().resolve()
@@ -33,11 +33,9 @@ def _safe_resolve(target: str, roots: List[str]) -> Optional[Path]:
         if not r:
             continue
         rp = Path(r).expanduser().resolve()
-        try:
-            p.relative_to(rp)
+        # p == rp  (the root itself is allowed) or p is a sub-path of rp
+        if p == rp or str(p).startswith(str(rp) + os.sep):
             return p
-        except ValueError:
-            continue
     return None
 
 

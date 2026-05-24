@@ -315,24 +315,24 @@ const SectionDataset = ({ cfg, set, val, rescan, scanResult }) => {
         <div class="card">
             <div class="card-title">
                 Подпапки
-                <span class="hint">формат имени: <span class="mono">10_concept</span> (число — это repeats)</span>
+                <span class="hint">— любое название, repeats задаётся в поле справа</span>
                 <div style="margin-left:auto; display:flex; gap:6px;">
-                    <${Btn} size="sm" variant="ghost" onClick=${rescan}>↻ Пересканировать</${Btn}>
+                    <${Btn} size="sm" variant="ghost" onClick=${rescan}>↻ Пересканировать папку</${Btn}>
                     <${Btn} size="sm" variant="ghost" onClick=${() => set('dataset.subsets', [
                         ...(cfg.dataset.subsets || []),
                         { image_dir: '', num_repeats: 10, caption_extension: '.txt', shuffle_caption: true, keep_tokens: 1, num_images: 0 }
-                    ])}>+ Добавить</${Btn}>
+                    ])}>+ Добавить вручную</${Btn}>
                 </div>
             </div>
             ${val.errMap['dataset.subsets'] && html`<div class="field-err" style="margin-bottom:8px;">${val.errMap['dataset.subsets']}</div>`}
 
             <div class="dataset-row" style="color: var(--text-mute); font-size: 11px; padding: 0 0 4px;">
-                <div>Картинок</div><div>Папка</div><div>Повторов</div><div>Подписи</div><div></div>
+                <div>Картинок</div><div>Папка</div><div>Repeats</div><div>Подписи (.txt)</div><div></div>
             </div>
             ${(cfg.dataset.subsets || []).map((s, i) => html`
                 <div class="dataset-row" key=${i}>
-                    <div class="mono tabnum" style="color: var(--text-dim);">${s.num_images}</div>
-                    <input class="mono" type="text" value=${s.image_dir} placeholder="/path/to/10_concept"
+                    <div class="mono tabnum" style="color: var(--text-dim);">${s.num_images || '—'}</div>
+                    <input class="mono" type="text" value=${s.image_dir} placeholder="/content/drive/MyDrive/dataset/concept"
                         onInput=${e => set(`dataset.subsets.${i}.image_dir`, e.target.value)} />
                     <input type="number" min="1" value=${s.num_repeats}
                         onInput=${e => set(`dataset.subsets.${i}.num_repeats`, parseInt(e.target.value, 10) || 1)} />
