@@ -166,7 +166,14 @@ class FileSystem:
         if target is None or not target.exists():
             return []
         items = []
-        pat_full = re.compile(r"^(.*?)_e(\d+)_s(\d+)(?:_(.+))?$")
+        # kohya sd-scripts format: <output>_<ts14>_<e000001|000012>_<idx02>_<seed>.png
+        # where the middle token is "e<6 digits>" for on-epoch saves or just
+        # "<6 digits>" (step count) for on-step saves.
+        pat_kohya = re.compile(
+            r"^(?P<name>.+?)_(?P<ts>\d{12,14})_(?:e(?P<epoch>\d+)|(?P<step>\d+))"
+            r"_(?P<idx>\d+)(?:_(?P<seed>\d+))?$"
+        )
+        # Fallback for older/variant formats: any "_e<N>_" or "_s<N>_" anywhere.
         pat_loose = re.compile(r"e(\d+)|epoch[_-]?(\d+)|step[_-]?(\d+)", re.IGNORECASE)
         for child in sorted(target.rglob("*")):
             if not child.is_file() or child.suffix.lower() not in IMAGE_EXTS:
@@ -175,11 +182,16 @@ class FileSystem:
             epoch = 0
             step = 0
             prompt_tag = ""
-            m = pat_full.match(stem)
+            m = pat_kohya.match(stem)
             if m:
-                epoch = int(m.group(2))
-                step = int(m.group(3))
-                prompt_tag = m.group(4) or ""
+                if m.group("epoch"):
+                    epoch = int(m.group("epoch"))
+                if m.group("step"):
+                    step = int(m.group("step"))
+                    if epoch == 0:
+                        # so the gallery x-axis isn't all "epoch 0"
+                        epoch = step
+                prompt_tag = m.group("idx") or ""
             else:
                 for m2 in pat_loose.finditer(stem):
                     if m2.group(1) or m2.group(2):

@@ -146,8 +146,25 @@ def make_app() -> FastAPI:
 
     @app.get("/api/fs/samples")
     def api_fs_samples(path: str = ""):
-        path = path or get_cfg().paths.samples_root or get_cfg().paths.output_root
-        return fs.list_samples(path)
+        # kohya hardcodes sample output to "<output_dir>/sample", so we must
+        # always scan output_root; samples_root is treated as an extra location
+        # (e.g. for users who copy samples elsewhere). Caller can override with
+        # ?path=... to inspect a single dir.
+        cfg = get_cfg()
+        if path:
+            return fs.list_samples(path)
+        roots = [cfg.paths.output_root, cfg.paths.samples_root]
+        seen = set()
+        out = []
+        for r in roots:
+            if not r:
+                continue
+            for item in fs.list_samples(r):
+                if item["path"] in seen:
+                    continue
+                seen.add(item["path"])
+                out.append(item)
+        return out
 
     @app.get("/api/fs/file")
     def api_fs_file(path: str):

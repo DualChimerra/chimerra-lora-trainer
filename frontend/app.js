@@ -243,7 +243,7 @@ const SectionProject = ({ cfg, set, val }) => {
                 <${Text} value=${cfg.paths.output_root} onInput=${v => set('paths.output_root', v)} placeholder="/content/drive/MyDrive/output/my-lora" />
             </${Field}>
             <${Field} label="samples_root" tipKey="paths.samples_root">
-                <${Text} value=${cfg.paths.samples_root} onInput=${v => set('paths.samples_root', v)} placeholder="(по умолчанию output_root/sample)" />
+                <${Text} value=${cfg.paths.samples_root} onInput=${v => set('paths.samples_root', v)} placeholder="(оставьте пустым — kohya пишет в output_root/sample)" />
             </${Field}>
             <${Field} label="sd_scripts_dir" tipKey="paths.sd_scripts_dir" err=${val.errMap['paths.sd_scripts_dir']}>
                 <${Text} value=${cfg.paths.sd_scripts_dir} onInput=${v => set('paths.sd_scripts_dir', v)} placeholder="/content/sd-scripts" />
@@ -1116,9 +1116,26 @@ const App = () => {
             if (ev.type === 'log' && /saving (checkpoint|state)|saved model|saving images/i.test(ev.line || '')) {
                 if (cfg) { refreshOutputs(cfg); refreshSamples(cfg); }
             }
+            // sample generation lags behind the "saving checkpoint" line by 20-60s,
+            // so also kick off a delayed refresh when kohya announces generation.
+            if (ev.type === 'log' && /generating sample images/i.test(ev.line || '')) {
+                if (cfg) setTimeout(() => { refreshSamples(cfg); }, 45000);
+            }
         });
         return close;
     }, [cfg]);
+
+    // While training is running, poll samples/outputs periodically so the
+    // gallery fills up even if we miss the log triggers above.
+    useEffect(() => {
+        if (status.state !== 'running' && status.state !== 'starting') return;
+        if (!cfg) return;
+        const id = setInterval(() => {
+            refreshSamples(cfg);
+            refreshOutputs(cfg);
+        }, 20000);
+        return () => clearInterval(id);
+    }, [status.state, cfg]);
 
     // debounce save
     const set = useCallback((path, value) => {
@@ -1158,7 +1175,9 @@ const App = () => {
     const refreshSamples = async (c) => {
         const target = (c || cfg);
         if (!target) return;
-        try { setSamples(await api.fsSamples(target.paths.samples_root || target.paths.output_root)); } catch {}
+        // Pass empty path so the backend merges output_root + samples_root.
+        // kohya always writes to <output_dir>/sample, so output_root is required.
+        try { setSamples(await api.fsSamples('')); } catch {}
     };
     const refreshModels = async (c) => {
         const target = (c || cfg);
