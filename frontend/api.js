@@ -25,6 +25,7 @@ export const api = {
     fsOutputs: (path = '') => req('GET', `/api/fs/outputs?path=${encodeURIComponent(path)}`),
     fsSamples: (path = '') => req('GET', `/api/fs/samples?path=${encodeURIComponent(path)}`),
     fileUrl:   (path) => `/api/fs/file?path=${encodeURIComponent(path)}`,
+    thumbUrl:  (path, size = 256) => `/api/fs/thumb?path=${encodeURIComponent(path)}&size=${size}`,
 
     calcSteps: () => req('GET', '/api/calc/total_steps'),
     previewCommand: (cfg) => req('POST', '/api/calc/preview_command', cfg),

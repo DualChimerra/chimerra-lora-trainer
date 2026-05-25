@@ -59,9 +59,13 @@ def make_app() -> FastAPI:
 
     init_paths = _read_env_paths()
 
-    # state dir lives under output_root if set, else /content
+    # state dir: LT_STATE_DIR wins (lets the Colab cache cell pin state on
+    # Drive even when output_root is redirected to local SSD), then output_root,
+    # then /content.
+    state_override = os.environ.get("LT_STATE_DIR", "").strip()
     state = StateStore(
-        primary_dir=os.path.join(init_paths.get("output_root", "") or "", ".lora_trainer"),
+        primary_dir=state_override
+            or os.path.join(init_paths.get("output_root", "") or "", ".lora_trainer"),
         fallback_dir="/content/.lora_trainer",
     )
 
@@ -173,7 +177,50 @@ def make_app() -> FastAPI:
         resolved = _safe_resolve(path, fs.roots)
         if resolved is None or not resolved.is_file():
             raise HTTPException(404, "not found or not allowed")
-        return FileResponse(str(resolved))
+        # immutable-ish: filename + mtime is the cache key on the client
+        return FileResponse(
+            str(resolved),
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    # Cached webp thumbnails for the gallery. Drive-mounted PNGs can be 1-3 MB
+    # each — at 30+ samples this kills page load. PIL renders a ~256px webp
+    # (~20 KB), cached on local SSD; subsequent loads are instant.
+    THUMB_CACHE = Path("/tmp/lora_trainer_thumbs")
+    THUMB_CACHE.mkdir(parents=True, exist_ok=True)
+
+    @app.get("/api/fs/thumb")
+    def api_fs_thumb(path: str, size: int = 256):
+        from .filesystem import _safe_resolve
+        import hashlib
+        resolved = _safe_resolve(path, fs.roots)
+        if resolved is None or not resolved.is_file():
+            raise HTTPException(404, "not found or not allowed")
+        size = max(64, min(int(size), 1024))
+        try:
+            mtime = int(resolved.stat().st_mtime)
+        except OSError:
+            raise HTTPException(404, "stat failed")
+        key = hashlib.sha1(f"{resolved}|{mtime}|{size}".encode()).hexdigest()
+        cached = THUMB_CACHE / f"{key}.webp"
+        if not cached.exists():
+            try:
+                from PIL import Image
+                with Image.open(resolved) as im:
+                    im = im.convert("RGB") if im.mode not in ("RGB", "RGBA") else im
+                    im.thumbnail((size, size), Image.LANCZOS)
+                    im.save(cached, "webp", quality=82, method=4)
+            except Exception:
+                # fall back to streaming the original
+                return FileResponse(
+                    str(resolved),
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
+        return FileResponse(
+            str(cached),
+            media_type="image/webp",
+            headers={"Cache-Control": "public, max-age=86400, immutable"},
+        )
 
     @app.get("/api/calc/total_steps")
     def api_calc_total_steps():
