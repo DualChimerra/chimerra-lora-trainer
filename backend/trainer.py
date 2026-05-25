@@ -111,11 +111,52 @@ class Trainer:
 
     async def _tail(self) -> None:
         assert self.proc is not None and self.proc.stdout is not None
+        # tqdm rewrites the progress bar with \r, not \n, so reading by newline
+        # buffers the bar until a real log line shows up. Split on either.
+        buf = bytearray()
+        last_status_emit = 0.0
+        last_progress_line = ""
         try:
-            async for raw in self.proc.stdout:
-                line = raw.decode("utf-8", errors="replace").rstrip("\n")
-                self._parse_line(line)
-                await self._broadcast({"type": "log", "stream": "stdout", "line": line})
+            while True:
+                chunk = await self.proc.stdout.read(4096)
+                if not chunk:
+                    break
+                buf.extend(chunk)
+                while True:
+                    idx = -1
+                    sep = 0
+                    for i, b in enumerate(buf):
+                        if b == 0x0a or b == 0x0d:  # \n or \r
+                            idx = i
+                            sep = b
+                            break
+                    if idx == -1:
+                        break
+                    raw = bytes(buf[:idx])
+                    del buf[: idx + 1]
+                    line = raw.decode("utf-8", errors="replace")
+                    if not line.strip():
+                        continue
+                    is_progress = self._parse_line(line)
+                    if is_progress:
+                        # tqdm rewrites — don't spam the log; just push status.
+                        if line != last_progress_line:
+                            last_progress_line = line
+                            now = time.time()
+                            if now - last_status_emit > 0.5:
+                                last_status_emit = now
+                                await self._broadcast({"type": "status", "status": self.status.model_dump()})
+                    else:
+                        await self._broadcast({"type": "log", "stream": "stdout", "line": line})
+            # flush trailing partial line
+            if buf:
+                line = bytes(buf).decode("utf-8", errors="replace")
+                if line.strip():
+                    is_progress = self._parse_line(line)
+                    if is_progress:
+                        await self._broadcast({"type": "status", "status": self.status.model_dump()})
+                    else:
+                        await self._broadcast({"type": "log", "stream": "stdout", "line": line})
         except Exception as e:
             await self._broadcast({"type": "log", "stream": "system", "line": f"[tail error] {e}"})
 
@@ -131,7 +172,8 @@ class Trainer:
             self.status.message = f"Process exited with code {rc}"
         await self._broadcast({"type": "status", "status": self.status.model_dump()})
 
-    def _parse_line(self, line: str) -> None:
+    def _parse_line(self, line: str) -> bool:
+        """Return True if the line is a tqdm progress update (not a real log line)."""
         m = PROGRESS_RX.search(line)
         if m:
             try:
@@ -149,7 +191,7 @@ class Trainer:
                     self.status.eta_seconds = int(per_step * remaining)
             except (ValueError, TypeError):
                 pass
-            return
+            return True
         me = EPOCH_RX.search(line)
         if me:
             try:
@@ -157,6 +199,7 @@ class Trainer:
                 self.status.total_epochs = int(me.group(2))
             except ValueError:
                 pass
+        return False
 
     async def stop(self) -> None:
         if not self.is_running():
