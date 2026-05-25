@@ -77,6 +77,21 @@ class DatasetSection(BaseModel):
     flip_aug: bool = False
     random_crop: bool = False
     max_token_length: int = 225
+
+    # Data loading performance — kohya defaults to 0 workers (single-threaded),
+    # which is a major cause of slow epochs on Colab. 8 + persistent is the
+    # standard "fast" config.
+    max_data_loader_n_workers: int = 8
+    persistent_data_loader_workers: bool = True
+
+    # Caption augmentation (global)
+    caption_dropout_rate: float = 0.0
+    caption_tag_dropout_rate: float = 0.0
+    caption_dropout_every_n_epochs: int = 0
+    token_warmup_min: int = 1
+    token_warmup_step: int = 0
+    weighted_captions: bool = False
+
     subsets: List[DatasetSubset] = Field(default_factory=list)
 
 
@@ -110,6 +125,12 @@ class NetworkSection(BaseModel):
     network_dropout: float = 0.0
     scale_weight_norms: float = 0.0
 
+    # Continue training from existing LoRA weights
+    network_weights: Optional[str] = None
+    dim_from_weights: bool = False
+    base_weights: List[str] = Field(default_factory=list)
+    base_weights_multiplier: List[float] = Field(default_factory=list)
+
 
 # ---------------------------------------------------------------------------
 # Optimizer / training schedule
@@ -135,9 +156,11 @@ class OptimizerSection(BaseModel):
     unet_lr: Optional[float] = None
     text_encoder_lr: Optional[float] = None
     lr_scheduler: LrScheduler = "cosine"
+    lr_scheduler_args: List[str] = Field(default_factory=list)
     lr_warmup_steps: int = 0
     lr_scheduler_num_cycles: int = 1
     lr_scheduler_power: float = 1.0
+    max_grad_norm: float = 1.0
 
 
 class TrainingSection(BaseModel):
@@ -153,16 +176,36 @@ class TrainingSection(BaseModel):
     gradient_checkpointing: bool = True
     xformers: bool = False
     sdpa: bool = True
+    mem_eff_attn: bool = False
     full_bf16: bool = False
     full_fp16: bool = False
+    lowram: bool = False
+    highvram: bool = False
+    fused_backward_pass: bool = False
+    vae_batch_size: int = 0  # 0 → kohya default; raise for speed if VRAM allows
+
+    # loss / timesteps
+    loss_type: Literal["l2", "l1", "huber", "smooth_l1"] = "l2"
+    huber_schedule: Literal["snr", "exponential", "constant"] = "snr"
+    huber_c: float = 0.1
+    prior_loss_weight: float = 1.0
+    min_timestep: int = 0
+    max_timestep: int = 1000
+
+    # state save / resume
+    save_state: bool = False
+    save_state_on_train_end: bool = False
+    resume: Optional[str] = None
 
     # noise / loss extras
     min_snr_gamma: Optional[float] = 5.0
     noise_offset: Optional[float] = 0.0357
     adaptive_noise_scale: Optional[float] = None
+    noise_offset_random_strength: bool = False
     multires_noise_iterations: Optional[int] = None
     multires_noise_discount: Optional[float] = None
     ip_noise_gamma: Optional[float] = None
+    ip_noise_gamma_random_strength: bool = False
     debiased_estimation_loss: bool = False
     zero_terminal_snr: bool = False
 

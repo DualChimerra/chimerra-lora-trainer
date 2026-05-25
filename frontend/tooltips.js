@@ -40,7 +40,15 @@ export const TIPS = {
     'dataset.color_aug':    'Случайные сдвиги цвета. Может слегка помочь стилю.',
     'dataset.flip_aug':     'Горизонтальное отзеркаливание. Не включайте для асимметричных концептов.',
     'dataset.random_crop':  'Случайные кропы вместо центральных.',
-    'dataset.max_token_length':'Максимум токенов в подписи (75 / 150 / 225).',
+    'dataset.max_token_length':'Максимум токенов в подписи (75 / 150 / 225). Для длинных тегов — 225.',
+    'dataset.max_data_loader_n_workers':'Воркеры PyTorch DataLoader. По умолчанию kohya = 0 (single-thread!) — это сильно замедляет эпохи. На Colab оптимально 4–8.',
+    'dataset.persistent_data_loader_workers':'Не пересоздавать воркеры каждую эпоху. Включайте при num_workers > 0 — экономит секунды между эпохами.',
+    'dataset.caption_dropout_rate':'Вероятность полностью обнулить подпись для картинки (0.0–0.1 типично).',
+    'dataset.caption_tag_dropout_rate':'Вероятность дропа отдельного тега (0.0–0.2). Регуляризация для тегированных датасетов.',
+    'dataset.caption_dropout_every_n_epochs':'Дропать подписи каждые N эпох (0 = выключено).',
+    'dataset.token_warmup_min':'Минимальное число токенов на старте при token-warmup.',
+    'dataset.token_warmup_step':'За сколько шагов разогнаться до полной длины подписи (0 = выключено).',
+    'dataset.weighted_captions':'Поддержка веса (tag:1.2) в подписях.',
 
     // dataset subset
     'subset.num_repeats':   'Сколько раз набор картинок повторится за эпоху.',
@@ -76,6 +84,12 @@ export const TIPS = {
     'optimizer.lr_scheduler':'cosine — самый частый выбор для LoRA.',
     'optimizer.lr_warmup_steps':'Сколько шагов с линейным разогревом LR от 0.',
     'optimizer.lr_scheduler_num_cycles':'Циклы для cosine_with_restarts.',
+    'optimizer.lr_scheduler_args':'Доп. аргументы шедулера (например, num_cycles=2 для cosine_with_restarts).',
+    'optimizer.max_grad_norm':'Клиппинг градиентов. 1.0 — стандартно. 0 = выключить клиппинг.',
+
+    // network — продолжение с весов
+    'network.network_weights':'Путь к существующей LoRA (.safetensors) — обучение продолжится с этих весов.',
+    'network.dim_from_weights':'Взять network_dim и alpha из файла весов (полезно при resume).',
 
     // training
     'training.train_batch_size':'Размер батча. На Colab T4 безопасно 1–2, A100 — 4+.',
@@ -98,6 +112,13 @@ export const TIPS = {
     'training.ip_noise_gamma':'Input perturbation γ. Сглаживает обучение.',
     'training.debiased_estimation_loss':'Debiased estimation loss (помогает с outliers).',
     'training.zero_terminal_snr':'Включить zero terminal SNR. Для v-pred моделей.',
+    'training.vae_batch_size':'Размер батча для VAE при кешировании латентов. 0 = дефолт kohya. Увеличьте для ускорения cache-фазы.',
+    'training.prior_loss_weight':'Вес prior-loss для регуляризационных картинок. 1.0 — стандарт.',
+    'training.loss_type':'Тип loss-функции. l2 — стандарт; huber/smooth_l1 устойчивее к outliers.',
+    'training.huber_schedule':'Как расписан huber c по timestep (snr — рекомендовано).',
+    'training.huber_c':'Параметр c для Huber-loss (0.1 типично).',
+    'training.min_timestep':'Минимальный timestep при сэмплинге (0 = весь диапазон).',
+    'training.max_timestep':'Максимальный timestep (1000 = весь диапазон). Уменьшение фокусирует на низком шуме.',
     'training.weighting_scheme':'Anima: схема взвешивания timestep-ов.',
     'training.discrete_flow_shift':'Anima: дискретный shift для FlowMatch (3.0 типично).',
 

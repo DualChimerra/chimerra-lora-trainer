@@ -9,7 +9,22 @@ export const BUILTIN_PRESETS = {
         optimizer: { optimizer_type: 'AdamW8bit', learning_rate: 1e-4, unet_lr: 1e-4, text_encoder_lr: 5e-5, lr_scheduler: 'cosine' },
         training: { mixed_precision: 'bf16', save_precision: 'fp16', gradient_checkpointing: true, sdpa: true,
                     min_snr_gamma: 5.0, noise_offset: 0.0357 },
-        dataset: { resolution: 1024, cache_latents: true, cache_text_encoder_outputs: true },
+        dataset: { resolution: 1024, cache_latents: true, cache_text_encoder_outputs: true,
+                   max_data_loader_n_workers: 8, persistent_data_loader_workers: true },
+    },
+    illustrious_fast: {
+        label: 'Illustrious · LoRA · ⚡ FAST (A100/L4)',
+        model: { arch: 'sdxl', preset: 'illustrious', clip_skip: 2 },
+        network: { kind: 'lora', network_dim: 32, network_alpha: 16, network_train_unet_only: true },
+        optimizer: { optimizer_type: 'AdamW8bit', learning_rate: 1e-4, unet_lr: 1e-4, lr_scheduler: 'cosine' },
+        // Speed-tuned: no checkpointing, highvram, TE cached (UNet-only).
+        training: { mixed_precision: 'bf16', save_precision: 'fp16',
+                    gradient_checkpointing: false, sdpa: true, highvram: true,
+                    min_snr_gamma: 5.0, noise_offset: 0.0357 },
+        dataset: { resolution: 1024,
+                   cache_latents: true, cache_latents_to_disk: true,
+                   cache_text_encoder_outputs: true, cache_text_encoder_outputs_to_disk: true,
+                   max_data_loader_n_workers: 8, persistent_data_loader_workers: true },
     },
     noobai_lora: {
         label: 'NoobAI · LoRA · 1024',
@@ -18,7 +33,8 @@ export const BUILTIN_PRESETS = {
         optimizer: { optimizer_type: 'AdamW8bit', learning_rate: 1e-4, lr_scheduler: 'cosine' },
         training: { mixed_precision: 'bf16', save_precision: 'fp16', gradient_checkpointing: true, sdpa: true,
                     min_snr_gamma: 5.0, noise_offset: 0.0357 },
-        dataset: { resolution: 1024, cache_latents: true, cache_text_encoder_outputs: true },
+        dataset: { resolution: 1024, cache_latents: true, cache_text_encoder_outputs: true,
+                   max_data_loader_n_workers: 8, persistent_data_loader_workers: true },
     },
     illustrious_lokr: {
         label: 'Illustrious · LoKr · low-rank style',
