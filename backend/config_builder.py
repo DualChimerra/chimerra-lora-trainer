@@ -212,8 +212,9 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
     add("network_module", network_module)
     add("network_dim", cfg.network.network_dim)
     add("network_alpha", cfg.network.network_alpha)
-    for na in network_args:
-        argv.extend(["--network_args", na])
+    if network_args:
+        argv.append("--network_args")
+        argv.extend(str(na) for na in network_args)
     if cfg.network.network_train_unet_only:
         argv.append("--network_train_unet_only")
     if cfg.network.network_train_text_encoder_only:
@@ -225,8 +226,9 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
 
     # --- optimizer --------------------------------------------------------
     add("optimizer_type", cfg.optimizer.optimizer_type)
-    for oa in cfg.optimizer.optimizer_args:
-        argv.extend(["--optimizer_args", oa])
+    if cfg.optimizer.optimizer_args:
+        argv.append("--optimizer_args")
+        argv.extend(str(oa) for oa in cfg.optimizer.optimizer_args)
     add("learning_rate", cfg.optimizer.learning_rate)
     add("unet_lr", cfg.optimizer.unet_lr)
     add("text_encoder_lr", cfg.optimizer.text_encoder_lr)
@@ -301,6 +303,13 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
             continue
         if v is True:
             argv.append(f"--{k}")
+        elif isinstance(v, (list, tuple)):
+            # kohya nargs="*" flags (e.g. text_encoder_lr, lr_scheduler_args)
+            # must be emitted once with all values, not repeated per value.
+            if not v:
+                continue
+            argv.append(f"--{k}")
+            argv.extend(str(x) for x in v)
         else:
             argv.extend([f"--{k}", str(v)])
 
