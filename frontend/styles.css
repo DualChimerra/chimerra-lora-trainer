@@ -576,50 +576,55 @@ textarea {
    Sample gallery grid
    ============================================================ */
 .gallery-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+.gallery-group {
     background: var(--bg-1);
     border: 1px solid var(--line);
     border-radius: var(--r-3);
-    overflow: auto;
-    max-height: 75vh;
+    padding: 12px 14px 14px;
 }
-.gallery-grid {
-    display: grid;
-    border-collapse: collapse;
-}
-.gallery-cell {
-    border-right: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-    padding: 4px;
-    background: var(--bg-1);
-    position: relative;
-}
-.gallery-cell.head {
-    background: var(--bg-2);
+.gallery-group-head {
     color: var(--text-dim);
-    font-size: 11px;
-    padding: 6px 8px;
+    font-size: 12px;
     font-weight: 500;
-    position: sticky;
-    z-index: 2;
+    margin-bottom: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.gallery-cell.head-x { top: 0; }
-.gallery-cell.head-y { left: 0; }
-.gallery-cell.head-corner { top: 0; left: 0; z-index: 3; }
-.gallery-cell img {
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    object-fit: cover;
-    border-radius: var(--r-1);
+.gallery-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+}
+.gallery-tile {
+    position: relative;
+    margin: 0;
+    border-radius: var(--r-2);
+    overflow: hidden;
     background: var(--bg-3);
     cursor: zoom-in;
+    aspect-ratio: 1 / 1;
+}
+.gallery-tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
     display: block;
 }
-.gallery-cell .empty {
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    background: var(--bg-2);
-    border: 1px dashed var(--line);
-    border-radius: var(--r-1);
+.gallery-tile figcaption {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    pointer-events: none;
 }
 
 /* ============================================================

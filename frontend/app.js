@@ -1,5 +1,5 @@
 // LoRA Trainer · Preact + htm, no build step.
-import { h, render, Fragment } from 'https://esm.sh/preact@10.22.0';
+import { h, render } from 'https://esm.sh/preact@10.22.0';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 
@@ -903,37 +903,43 @@ const SectionSamples = ({ cfg, set, val }) => {
 const SectionGallery = ({ cfg, samples, refresh }) => {
     const [zoom, setZoom] = useState(null);
 
-    // group: rows = prompt index (we infer from order or from `prompt_tag`); cols = epochs
-    const { rows, cols, matrix, promptLabels } = useMemo(() => {
-        const epochs = new Set();
-        samples.forEach(s => epochs.add(s.epoch || 0));
-        const cols = [...epochs].sort((a, b) => a - b);
-        // map each sample to a prompt index by matching prompt_tag tail or by sample number suffix.
-        // fallback: round-robin index using filename ordering within an epoch.
+    // Group by prompt index; within each prompt show a wrapping grid of
+    // sample tiles sorted by epoch descending (newest first). Tile label is
+    // "ep N · step M". Avoids the giant horizontal-scrolling matrix.
+    const { groups, promptLabels } = useMemo(() => {
         const promptCount = Math.max(1, cfg.samples.prompts?.length || 1);
-        const matrix = {};
+        const promptLabels = (cfg.samples.prompts || []).map((p, i) =>
+            `#${i + 1} · ${(p.text || '').slice(0, 60)}${(p.text || '').length > 60 ? '…' : ''}`);
+        while (promptLabels.length < promptCount) promptLabels.push(`#${promptLabels.length + 1}`);
+
         const epochCounters = {};
+        const buckets = Array.from({ length: promptCount }, () => []);
         samples
             .slice()
             .sort((a, b) => (a.epoch - b.epoch) || a.name.localeCompare(b.name))
             .forEach(s => {
                 const ep = s.epoch || 0;
-                const idx = (epochCounters[ep] = (epochCounters[ep] ?? -1) + 1) % promptCount;
-                matrix[`${idx}|${ep}`] = s;
+                // Prefer the prompt index parsed from the filename; fall back
+                // to round-robin within the epoch.
+                let idx;
+                const tag = parseInt(s.prompt_tag, 10);
+                if (!Number.isNaN(tag) && tag >= 0 && tag < promptCount) {
+                    idx = tag;
+                } else {
+                    idx = (epochCounters[ep] = (epochCounters[ep] ?? -1) + 1) % promptCount;
+                }
+                buckets[idx].push(s);
             });
-        const promptLabels = (cfg.samples.prompts || []).map((p, i) =>
-            `#${i + 1} · ${(p.text || '').slice(0, 36)}${(p.text || '').length > 36 ? '…' : ''}`);
-        if (promptLabels.length === 0) promptLabels.push('#1');
-        const rows = promptLabels.map((_, i) => i);
-        return { rows, cols, matrix, promptLabels };
+        // newest epoch first inside each prompt bucket
+        buckets.forEach(b => b.sort((a, b) => (b.epoch - a.epoch) || (b.step - a.step)));
+        const groups = buckets.map((tiles, i) => ({ idx: i, label: promptLabels[i], tiles }));
+        return { groups, promptLabels };
     }, [samples, cfg.samples.prompts]);
-
-    const cellSize = 168;
 
     return html`
         <h2>Галерея сэмплов</h2>
         <div class="subtitle">
-            Ось X — эпохи, ось Y — промпты. ${samples.length} картинок.
+            ${samples.length} картинок · группировка по промптам, новые эпохи сверху.
             <button class="btn btn-sm btn-ghost" style="margin-left:8px;" onClick=${refresh}>↻ Обновить</button>
         </div>
 
@@ -941,28 +947,21 @@ const SectionGallery = ({ cfg, samples, refresh }) => {
             ? html`<div class="card dim">Пока ничего не сгенерировано. Сэмплы появятся здесь по мере прохождения эпох.</div>`
             : html`
                 <div class="gallery-shell">
-                    <div class="gallery-grid"
-                        style=${`grid-template-columns: 220px repeat(${cols.length}, ${cellSize}px); grid-template-rows: 36px repeat(${rows.length}, ${cellSize}px);`}>
-                        <div class="gallery-cell head head-corner" style="left:0;top:0;">prompt \\ epoch</div>
-                        ${cols.map(ep => html`<div class="gallery-cell head head-x">epoch ${ep}</div>`)}
-                        ${rows.map((r, ri) => html`
-                            <${Fragment} key=${ri}>
-                                <div class="gallery-cell head head-y" title=${promptLabels[r]}>${promptLabels[r]}</div>
-                                ${cols.map(ep => {
-                                    const s = matrix[`${r}|${ep}`];
-                                    return html`
-                                        <div class="gallery-cell" key=${ep}>
-                                            ${s
-                                                ? html`<img src=${api.fileUrl(s.path)}
-                                                    title=${`epoch ${ep} · step ${s.step} · ${s.name}`}
-                                                    onClick=${() => setZoom(s)} />`
-                                                : html`<div class="empty"></div>`}
-                                        </div>
-                                    `;
-                                })}
-                            </${Fragment}>
-                        `)}
-                    </div>
+                    ${groups.filter(g => g.tiles.length > 0).map(g => html`
+                        <section class="gallery-group" key=${g.idx}>
+                            <header class="gallery-group-head" title=${g.label}>${g.label}</header>
+                            <div class="gallery-tiles">
+                                ${g.tiles.map(s => html`
+                                    <figure class="gallery-tile" key=${s.path} onClick=${() => setZoom(s)}>
+                                        <img src=${api.thumbUrl(s.path, 256)}
+                                            loading="lazy" decoding="async"
+                                            title=${`epoch ${s.epoch} · step ${s.step} · ${s.name}`} />
+                                        <figcaption>ep ${s.epoch}${s.step ? ` · ${s.step}` : ''}</figcaption>
+                                    </figure>
+                                `)}
+                            </div>
+                        </section>
+                    `)}
                 </div>
             `}
 
