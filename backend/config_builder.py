@@ -148,7 +148,18 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
 
     network_module, network_args = _network_module(cfg.network)
 
-    argv: List[str] = ["accelerate", "launch", "--num_cpu_threads_per_process=2", script]
+    # Pass num_processes/mixed_precision/dynamo_backend explicitly so
+    # accelerate doesn't fall back to its "no" defaults (which break fp16
+    # grad scaling) and doesn't print the warning at startup.
+    argv: List[str] = [
+        "accelerate", "launch",
+        "--num_cpu_threads_per_process=2",
+        "--num_processes=1",
+        "--num_machines=1",
+        f"--mixed_precision={cfg.training.mixed_precision}",
+        "--dynamo_backend=no",
+        script,
+    ]
 
     def add(flag: str, value):
         if value is None:
@@ -170,7 +181,8 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
             add("vae", cfg.model.vae)
         if cfg.model.v_parameterization:
             argv.append("--v_parameterization")
-        add("clip_skip", cfg.model.clip_skip)
+        # kohya warns "clip_skip will be unexpected" for SDXL — the script
+        # ignores it for two-TE SDXL models. Don't bother sending it.
 
     add("dataset_config", str(dataset_toml))
     add("output_dir", cfg.paths.output_root)
