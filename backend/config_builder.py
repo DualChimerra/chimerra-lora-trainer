@@ -153,7 +153,7 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
     # grad scaling) and doesn't print the warning at startup.
     argv: List[str] = [
         "accelerate", "launch",
-        "--num_cpu_threads_per_process=2",
+        "--num_cpu_threads_per_process=4",
         "--num_processes=1",
         "--num_machines=1",
         f"--mixed_precision={cfg.training.mixed_precision}",
@@ -220,6 +220,25 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
     if cfg.dataset.random_crop:
         argv.append("--random_crop")
 
+    # Data-loader speed (biggest single perf knob — kohya default is 0, which
+    # leaves data loading single-threaded and easily halves throughput).
+    add("max_data_loader_n_workers", cfg.dataset.max_data_loader_n_workers)
+    if cfg.dataset.persistent_data_loader_workers:
+        argv.append("--persistent_data_loader_workers")
+
+    # Caption augmentation (global, kohya reads these from CLI not TOML)
+    if cfg.dataset.caption_dropout_rate and cfg.dataset.caption_dropout_rate > 0:
+        add("caption_dropout_rate", cfg.dataset.caption_dropout_rate)
+    if cfg.dataset.caption_tag_dropout_rate and cfg.dataset.caption_tag_dropout_rate > 0:
+        add("caption_tag_dropout_rate", cfg.dataset.caption_tag_dropout_rate)
+    if cfg.dataset.caption_dropout_every_n_epochs and cfg.dataset.caption_dropout_every_n_epochs > 0:
+        add("caption_dropout_every_n_epochs", cfg.dataset.caption_dropout_every_n_epochs)
+    if cfg.dataset.token_warmup_step and cfg.dataset.token_warmup_step > 0:
+        add("token_warmup_min", cfg.dataset.token_warmup_min)
+        add("token_warmup_step", cfg.dataset.token_warmup_step)
+    if cfg.dataset.weighted_captions:
+        argv.append("--weighted_captions")
+
     # --- network ----------------------------------------------------------
     add("network_module", network_module)
     add("network_dim", cfg.network.network_dim)
@@ -235,6 +254,16 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
         add("network_dropout", cfg.network.network_dropout)
     if cfg.network.scale_weight_norms and cfg.network.scale_weight_norms > 0:
         add("scale_weight_norms", cfg.network.scale_weight_norms)
+    if cfg.network.network_weights:
+        add("network_weights", cfg.network.network_weights)
+        if cfg.network.dim_from_weights:
+            argv.append("--dim_from_weights")
+    if cfg.network.base_weights:
+        argv.append("--base_weights")
+        argv.extend(str(w) for w in cfg.network.base_weights)
+        if cfg.network.base_weights_multiplier:
+            argv.append("--base_weights_multiplier")
+            argv.extend(str(m) for m in cfg.network.base_weights_multiplier)
 
     # --- optimizer --------------------------------------------------------
     add("optimizer_type", cfg.optimizer.optimizer_type)
@@ -245,9 +274,14 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
     add("unet_lr", cfg.optimizer.unet_lr)
     add("text_encoder_lr", cfg.optimizer.text_encoder_lr)
     add("lr_scheduler", cfg.optimizer.lr_scheduler)
+    if cfg.optimizer.lr_scheduler_args:
+        argv.append("--lr_scheduler_args")
+        argv.extend(str(a) for a in cfg.optimizer.lr_scheduler_args)
     add("lr_warmup_steps", cfg.optimizer.lr_warmup_steps)
     add("lr_scheduler_num_cycles", cfg.optimizer.lr_scheduler_num_cycles)
     add("lr_scheduler_power", cfg.optimizer.lr_scheduler_power)
+    if cfg.optimizer.max_grad_norm is not None:
+        add("max_grad_norm", cfg.optimizer.max_grad_norm)
 
     # --- training ---------------------------------------------------------
     add("train_batch_size", cfg.training.train_batch_size)
@@ -268,16 +302,49 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
         argv.append("--xformers")
     if cfg.training.sdpa:
         argv.append("--sdpa")
+    if cfg.training.mem_eff_attn:
+        argv.append("--mem_eff_attn")
     if cfg.training.full_bf16:
         argv.append("--full_bf16")
     if cfg.training.full_fp16:
         argv.append("--full_fp16")
+    if cfg.training.lowram:
+        argv.append("--lowram")
+    if cfg.training.highvram:
+        argv.append("--highvram")
+    if cfg.training.fused_backward_pass:
+        argv.append("--fused_backward_pass")
+    if cfg.training.vae_batch_size and cfg.training.vae_batch_size > 0:
+        add("vae_batch_size", cfg.training.vae_batch_size)
+
+    # loss / timesteps
+    if cfg.training.loss_type and cfg.training.loss_type != "l2":
+        add("loss_type", cfg.training.loss_type)
+        if cfg.training.loss_type in ("huber", "smooth_l1"):
+            add("huber_schedule", cfg.training.huber_schedule)
+            add("huber_c", cfg.training.huber_c)
+    if cfg.training.prior_loss_weight is not None and cfg.training.prior_loss_weight != 1.0:
+        add("prior_loss_weight", cfg.training.prior_loss_weight)
+    if cfg.training.min_timestep and cfg.training.min_timestep > 0:
+        add("min_timestep", cfg.training.min_timestep)
+    if cfg.training.max_timestep and cfg.training.max_timestep < 1000:
+        add("max_timestep", cfg.training.max_timestep)
+
+    # state save / resume
+    if cfg.training.save_state:
+        argv.append("--save_state")
+    if cfg.training.save_state_on_train_end:
+        argv.append("--save_state_on_train_end")
+    if cfg.training.resume:
+        add("resume", cfg.training.resume)
 
     # noise / loss
     if cfg.training.min_snr_gamma is not None:
         add("min_snr_gamma", cfg.training.min_snr_gamma)
     if cfg.training.noise_offset:
         add("noise_offset", cfg.training.noise_offset)
+        if cfg.training.noise_offset_random_strength:
+            argv.append("--noise_offset_random_strength")
     if cfg.training.adaptive_noise_scale is not None:
         add("adaptive_noise_scale", cfg.training.adaptive_noise_scale)
     if cfg.training.multires_noise_iterations:
@@ -285,6 +352,8 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
         add("multires_noise_discount", cfg.training.multires_noise_discount)
     if cfg.training.ip_noise_gamma is not None:
         add("ip_noise_gamma", cfg.training.ip_noise_gamma)
+        if cfg.training.ip_noise_gamma_random_strength:
+            argv.append("--ip_noise_gamma_random_strength")
     if cfg.training.debiased_estimation_loss:
         argv.append("--debiased_estimation_loss")
     if cfg.training.zero_terminal_snr:

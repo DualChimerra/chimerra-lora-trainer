@@ -85,6 +85,7 @@ function cleanForExport(cfg) {
             'min_snr_gamma', 'noise_offset', 'adaptive_noise_scale',
             'multires_noise_iterations', 'multires_noise_discount',
             'ip_noise_gamma', 'debiased_estimation_loss', 'zero_terminal_snr',
+            'noise_offset_random_strength', 'ip_noise_gamma_random_strength',
         ];
         tdel.forEach(k => delete c.training[k]);
     } else {
@@ -379,16 +380,36 @@ const SectionDataset = ({ cfg, set, val, rescan, scanResult }) => {
                 <div>Картинок</div><div>Папка</div><div>Repeats</div><div>Подписи (.txt)</div><div></div>
             </div>
             ${(cfg.dataset.subsets || []).map((s, i) => html`
-                <div class="dataset-row" key=${i}>
-                    <div class="mono tabnum" style="color: var(--text-dim);">${s.num_images || '—'}</div>
-                    <input class="mono" type="text" value=${s.image_dir} placeholder="/content/drive/MyDrive/dataset/concept"
-                        onInput=${e => set(`dataset.subsets.${i}.image_dir`, e.target.value)} />
-                    <input type="number" min="1" value=${s.num_repeats}
-                        onInput=${e => set(`dataset.subsets.${i}.num_repeats`, parseInt(e.target.value, 10) || 1)} />
-                    <input type="text" value=${s.caption_extension}
-                        onInput=${e => set(`dataset.subsets.${i}.caption_extension`, e.target.value)} />
-                    <button class="btn btn-sm btn-ghost" title="Удалить"
-                        onClick=${() => set('dataset.subsets', cfg.dataset.subsets.filter((_, j) => j !== i))}>✕</button>
+                <div key=${i} style="border-bottom: 1px solid var(--line); padding-bottom:6px; margin-bottom:6px;">
+                    <div class="dataset-row">
+                        <div class="mono tabnum" style="color: var(--text-dim);">${s.num_images || '—'}</div>
+                        <input class="mono" type="text" value=${s.image_dir} placeholder="/content/drive/MyDrive/dataset/concept"
+                            onInput=${e => set(`dataset.subsets.${i}.image_dir`, e.target.value)} />
+                        <input type="number" min="1" value=${s.num_repeats}
+                            onInput=${e => set(`dataset.subsets.${i}.num_repeats`, parseInt(e.target.value, 10) || 1)} />
+                        <input type="text" value=${s.caption_extension}
+                            onInput=${e => set(`dataset.subsets.${i}.caption_extension`, e.target.value)} />
+                        <button class="btn btn-sm btn-ghost" title="Удалить"
+                            onClick=${() => set('dataset.subsets', cfg.dataset.subsets.filter((_, j) => j !== i))}>✕</button>
+                    </div>
+                    <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding-left:4px; margin-top:4px; font-size:11.5px;">
+                        <${Check} value=${s.shuffle_caption !== false} onInput=${v => set(`dataset.subsets.${i}.shuffle_caption`, v)} label="shuffle_caption" />
+                        <label style="display:flex; align-items:center; gap:4px;">
+                            <span class="dim">keep_tokens</span>
+                            <input type="number" min="0" style="width:60px;" value=${s.keep_tokens ?? 1}
+                                onInput=${e => set(`dataset.subsets.${i}.keep_tokens`, parseInt(e.target.value, 10) || 0)} />
+                        </label>
+                        <label style="display:flex; align-items:center; gap:4px; flex:1; min-width:220px;">
+                            <span class="dim">class_tokens</span>
+                            <input type="text" style="flex:1;" value=${s.class_tokens || ''} placeholder="(опционально, для картинок без .txt)"
+                                onInput=${e => set(`dataset.subsets.${i}.class_tokens`, e.target.value || null)} />
+                        </label>
+                        <label style="display:flex; align-items:center; gap:4px;">
+                            <span class="dim">keep_tokens_separator</span>
+                            <input type="text" style="width:60px;" value=${s.keep_tokens_separator || ''} placeholder="|||"
+                                onInput=${e => set(`dataset.subsets.${i}.keep_tokens_separator`, e.target.value || null)} />
+                        </label>
+                    </div>
                 </div>
             `)}
         </div>
@@ -416,6 +437,53 @@ const SectionDataset = ({ cfg, set, val, rescan, scanResult }) => {
                 <${Check} value=${cfg.dataset.color_aug} onInput=${v => set('dataset.color_aug', v)} label="color_aug" />
                 <${Check} value=${cfg.dataset.flip_aug} onInput=${v => set('dataset.flip_aug', v)} label="flip_aug" />
                 <${Check} value=${cfg.dataset.random_crop} onInput=${v => set('dataset.random_crop', v)} label="random_crop" />
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Подписи и DataLoader</div>
+            <div class="grid-3">
+                <${Field} label="max_token_length" tipKey="dataset.max_token_length">
+                    <${Select} value=${String(cfg.dataset.max_token_length || 225)}
+                        onInput=${v => set('dataset.max_token_length', parseInt(v, 10))}
+                        options=${[['75','75'],['150','150'],['225','225']]} />
+                </${Field}>
+                <${Field} label="max_data_loader_n_workers" tipKey="dataset.max_data_loader_n_workers">
+                    <${Num} value=${cfg.dataset.max_data_loader_n_workers ?? 8} min=${0} max=${32}
+                        onInput=${v => set('dataset.max_data_loader_n_workers', v)} />
+                </${Field}>
+                <${Field} label="persistent_data_loader_workers" tipKey="dataset.persistent_data_loader_workers">
+                    <${Switch} value=${cfg.dataset.persistent_data_loader_workers !== false}
+                        onInput=${v => set('dataset.persistent_data_loader_workers', v)} />
+                </${Field}>
+                <${Field} label="caption_dropout_rate" tipKey="dataset.caption_dropout_rate">
+                    <${Num} value=${cfg.dataset.caption_dropout_rate ?? 0} step=${0.01} min=${0} max=${1}
+                        onInput=${v => set('dataset.caption_dropout_rate', v)} />
+                </${Field}>
+                <${Field} label="caption_tag_dropout_rate" tipKey="dataset.caption_tag_dropout_rate">
+                    <${Num} value=${cfg.dataset.caption_tag_dropout_rate ?? 0} step=${0.01} min=${0} max=${1}
+                        onInput=${v => set('dataset.caption_tag_dropout_rate', v)} />
+                </${Field}>
+                <${Field} label="caption_dropout_every_n_epochs" tipKey="dataset.caption_dropout_every_n_epochs">
+                    <${Num} value=${cfg.dataset.caption_dropout_every_n_epochs ?? 0} min=${0}
+                        onInput=${v => set('dataset.caption_dropout_every_n_epochs', v)} />
+                </${Field}>
+                <${Field} label="token_warmup_min" tipKey="dataset.token_warmup_min">
+                    <${Num} value=${cfg.dataset.token_warmup_min ?? 1} min=${1}
+                        onInput=${v => set('dataset.token_warmup_min', v)} />
+                </${Field}>
+                <${Field} label="token_warmup_step" tipKey="dataset.token_warmup_step">
+                    <${Num} value=${cfg.dataset.token_warmup_step ?? 0} min=${0}
+                        onInput=${v => set('dataset.token_warmup_step', v)} />
+                </${Field}>
+                <${Field} label="weighted_captions" tipKey="dataset.weighted_captions">
+                    <${Switch} value=${!!cfg.dataset.weighted_captions}
+                        onInput=${v => set('dataset.weighted_captions', v)} />
+                </${Field}>
+            </div>
+            <div class="dim" style="font-size:11.5px; margin-top:6px;">
+                💡 Скорость: <b>max_data_loader_n_workers</b> = 4–8 + <b>persistent_data_loader_workers</b> = ON
+                часто ускоряют эпохи на 30–80% на Colab. Если эпоха длится 2× дольше ожидаемого — проверьте эти два поля.
             </div>
         </div>
     `;
@@ -504,6 +572,18 @@ const SectionNetwork = ({ cfg, set, val }) => {
                 <div class="field-err" style="margin-top:6px;">${val.errMap['network.network_train_text_encoder_only']}</div>
             `}
         </div>
+
+        <div class="card">
+            <div class="card-title">Продолжить с весов (опционально)</div>
+            <${Field} label="network_weights" tipKey="network.network_weights">
+                <${Text} value=${n.network_weights || ''} onInput=${v => set('network.network_weights', v || null)}
+                    placeholder="(пустое — обучаем с нуля; или путь к .safetensors LoRA)" />
+            </${Field}>
+            <${Field} label="dim_from_weights" tipKey="network.dim_from_weights">
+                <${Check} value=${!!n.dim_from_weights} onInput=${v => set('network.dim_from_weights', v)}
+                    label="взять network_dim/alpha из весов" />
+            </${Field}>
+        </div>
     `;
 };
 
@@ -552,6 +632,10 @@ const SectionTraining = ({ cfg, set, val }) => {
                 <${Field} label="lr_scheduler_power" tipKey="optimizer.lr_scheduler_power">
                     <${Num} value=${cfg.optimizer.lr_scheduler_power} step=${0.1} onInput=${v => set('optimizer.lr_scheduler_power', v)} />
                 </${Field}>
+                <${Field} label="max_grad_norm" tipKey="optimizer.max_grad_norm">
+                    <${Num} value=${cfg.optimizer.max_grad_norm ?? 1.0} step=${0.1} min=${0}
+                        onInput=${v => set('optimizer.max_grad_norm', v)} />
+                </${Field}>
             </div>
             <${Field} label="optimizer_args" tipKey="optimizer.optimizer_args" columns="stack">
                 <textarea placeholder=${"weight_decay=0.1\nbetas=0.9,0.999"}
@@ -563,6 +647,12 @@ const SectionTraining = ({ cfg, set, val }) => {
                             .split(/\n+/)
                             .map(s => s.trim())
                             .filter(Boolean))}></textarea>
+            </${Field}>
+            <${Field} label="lr_scheduler_args" tipKey="optimizer.lr_scheduler_args" columns="stack">
+                <textarea placeholder=${"num_cycles=1\npower=1.0"}
+                    value=${(cfg.optimizer.lr_scheduler_args || []).join('\n')}
+                    onInput=${e => set('optimizer.lr_scheduler_args',
+                        e.target.value.replace(/&#10;|&#xA;/gi, '\n').split(/\n+/).map(s => s.trim()).filter(Boolean))}></textarea>
             </${Field}>
         </div>
 
@@ -616,9 +706,62 @@ const SectionTraining = ({ cfg, set, val }) => {
                 <${Check} value=${cfg.training.gradient_checkpointing} onInput=${v => set('training.gradient_checkpointing', v)} label="gradient_checkpointing" />
                 <${Check} value=${cfg.training.sdpa} onInput=${v => set('training.sdpa', v)} label="sdpa" />
                 <${Check} value=${cfg.training.xformers} onInput=${v => set('training.xformers', v)} label="xformers" />
+                <${Check} value=${cfg.training.mem_eff_attn} onInput=${v => set('training.mem_eff_attn', v)} label="mem_eff_attn" />
                 <${Check} value=${cfg.training.full_bf16} onInput=${v => set('training.full_bf16', v)} label="full_bf16" />
                 <${Check} value=${cfg.training.full_fp16} onInput=${v => set('training.full_fp16', v)} label="full_fp16" />
+                <${Check} value=${cfg.training.lowram} onInput=${v => set('training.lowram', v)} label="lowram" />
+                <${Check} value=${cfg.training.highvram} onInput=${v => set('training.highvram', v)} label="highvram" />
+                <${Check} value=${cfg.training.fused_backward_pass} onInput=${v => set('training.fused_backward_pass', v)} label="fused_backward_pass" />
             </div>
+            <div class="grid-3" style="margin-top:6px;">
+                <${Field} label="vae_batch_size" tipKey="training.vae_batch_size">
+                    <${Num} value=${cfg.training.vae_batch_size ?? 0} min=${0}
+                        onInput=${v => set('training.vae_batch_size', v)} />
+                </${Field}>
+                <${Field} label="prior_loss_weight" tipKey="training.prior_loss_weight">
+                    <${Num} value=${cfg.training.prior_loss_weight ?? 1.0} step=${0.1} min=${0}
+                        onInput=${v => set('training.prior_loss_weight', v)} />
+                </${Field}>
+            </div>
+            <div class="dim" style="font-size:11.5px; margin-top:6px;">
+                💡 Скорость: отключите <b>gradient_checkpointing</b> если VRAM хватает (+20–25% throughput).
+                Включите <b>highvram</b> на A100/L4 чтобы держать модели в GPU между прогонами.
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Loss · Timestep · Save State</div>
+            <div class="grid-3">
+                <${Field} label="loss_type" tipKey="training.loss_type">
+                    <${Select} value=${cfg.training.loss_type || 'l2'} onInput=${v => set('training.loss_type', v)}
+                        options=${['l2','l1','huber','smooth_l1']} />
+                </${Field}>
+                ${(cfg.training.loss_type === 'huber' || cfg.training.loss_type === 'smooth_l1') && html`
+                    <${Field} label="huber_schedule" tipKey="training.huber_schedule">
+                        <${Select} value=${cfg.training.huber_schedule || 'snr'} onInput=${v => set('training.huber_schedule', v)}
+                            options=${['snr','exponential','constant']} />
+                    </${Field}>
+                    <${Field} label="huber_c" tipKey="training.huber_c">
+                        <${Num} value=${cfg.training.huber_c ?? 0.1} step=${0.01} onInput=${v => set('training.huber_c', v)} />
+                    </${Field}>
+                `}
+                <${Field} label="min_timestep" tipKey="training.min_timestep">
+                    <${Num} value=${cfg.training.min_timestep ?? 0} min=${0} max=${1000}
+                        onInput=${v => set('training.min_timestep', v)} />
+                </${Field}>
+                <${Field} label="max_timestep" tipKey="training.max_timestep">
+                    <${Num} value=${cfg.training.max_timestep ?? 1000} min=${0} max=${1000}
+                        onInput=${v => set('training.max_timestep', v)} />
+                </${Field}>
+            </div>
+            <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">
+                <${Check} value=${cfg.training.save_state} onInput=${v => set('training.save_state', v)} label="save_state (на каждом save_every_n_epochs)" />
+                <${Check} value=${cfg.training.save_state_on_train_end} onInput=${v => set('training.save_state_on_train_end', v)} label="save_state_on_train_end" />
+            </div>
+            <${Field} label="resume (путь к state-папке)" tipKey="training.resume">
+                <${Text} value=${cfg.training.resume || ''} placeholder="(пустое — старт с нуля)"
+                    onInput=${v => set('training.resume', v || null)} />
+            </${Field}>
         </div>
 
         <div class="card">
@@ -675,6 +818,8 @@ const SectionTraining = ({ cfg, set, val }) => {
                     <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">
                         <${Check} value=${cfg.training.debiased_estimation_loss} onInput=${v => set('training.debiased_estimation_loss', v)} label="debiased_estimation_loss" />
                         <${Check} value=${cfg.training.zero_terminal_snr} onInput=${v => set('training.zero_terminal_snr', v)} label="zero_terminal_snr" />
+                        <${Check} value=${cfg.training.noise_offset_random_strength} onInput=${v => set('training.noise_offset_random_strength', v)} label="noise_offset_random_strength" />
+                        <${Check} value=${cfg.training.ip_noise_gamma_random_strength} onInput=${v => set('training.ip_noise_gamma_random_strength', v)} label="ip_noise_gamma_random_strength" />
                     </div>
                 `
             }
