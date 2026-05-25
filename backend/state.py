@@ -77,6 +77,9 @@ class StateStore:
             config=config,
         )
         path = self._preset_path(name)
+        # Self-heal: the presets dir may have been wiped (Drive remount,
+        # external cleanup) since _ensure() ran at startup.
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(preset.model_dump_json(indent=2), encoding="utf-8")
         return preset
 
