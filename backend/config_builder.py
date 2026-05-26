@@ -18,9 +18,13 @@ from .schemas import TrainConfig, NetworkSection, SamplesSection
 # ---------------------------------------------------------------------------
 # Network module / args
 # ---------------------------------------------------------------------------
-def _network_module(net: NetworkSection) -> Tuple[str, List[str]]:
-    """Map (kind) -> (network_module, network_args[])."""
+def _network_module(net: NetworkSection, arch: str = "sdxl") -> Tuple[str, List[str]]:
+    """Map (kind, arch) -> (network_module, network_args[])."""
     if net.kind == "lora":
+        # Anima is a DiT — `networks.lora` matches SDXL UNet layer names and
+        # produces "0 modules". Kohya ships a DiT-aware variant.
+        if arch == "anima":
+            return ("networks.lora_anima", [])
         return ("networks.lora", [])
 
     # Everything else lives in LyCORIS
@@ -146,7 +150,7 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
     else:
         script = os.path.join(sd, "sdxl_train_network.py")
 
-    network_module, network_args = _network_module(cfg.network)
+    network_module, network_args = _network_module(cfg.network, cfg.model.arch)
 
     # Pass num_processes/mixed_precision/dynamo_backend explicitly so
     # accelerate doesn't fall back to its "no" defaults (which break fp16
