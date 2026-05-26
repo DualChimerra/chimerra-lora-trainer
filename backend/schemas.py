@@ -6,7 +6,7 @@ config_builder can pass them through without name translation.
 from __future__ import annotations
 
 from typing import Literal, Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +274,22 @@ class TrainConfig(BaseModel):
 
     # arbitrary additional kohya args the user might add via the "advanced" pane
     extra_args: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _strip_arch_irrelevant(self, handler):
+        # Strip fields that don't apply to the selected architecture so the
+        # exported/saved JSON matches what the UI shows. Anima is DiT (no conv
+        # layers) and uses Qwen3 TE (no 75-token CLIP limit). Using a wrap
+        # serializer ensures this also fires when TrainConfig is nested inside
+        # another model (e.g. Preset.config).
+        data = handler(self)
+        if self.model.arch == "anima":
+            net = data.get("network") or {}
+            net.pop("conv_dim", None)
+            net.pop("conv_alpha", None)
+            ds = data.get("dataset") or {}
+            ds.pop("max_token_length", None)
+        return data
 
 
 # ---------------------------------------------------------------------------
