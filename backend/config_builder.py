@@ -212,7 +212,8 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
         argv.append("--cache_text_encoder_outputs")
         if cfg.dataset.cache_text_encoder_outputs_to_disk:
             argv.append("--cache_text_encoder_outputs_to_disk")
-    add("max_token_length", cfg.dataset.max_token_length)
+    if cfg.model.arch != "anima":
+        add("max_token_length", cfg.dataset.max_token_length)
     if cfg.dataset.color_aug:
         argv.append("--color_aug")
     if cfg.dataset.flip_aug:
