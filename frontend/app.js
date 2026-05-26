@@ -443,11 +443,13 @@ const SectionDataset = ({ cfg, set, val, rescan, scanResult }) => {
         <div class="card">
             <div class="card-title">Подписи и DataLoader</div>
             <div class="grid-3">
+                ${cfg.model.arch !== 'anima' && html`
                 <${Field} label="max_token_length" tipKey="dataset.max_token_length">
-                    <${Select} value=${String(cfg.dataset.max_token_length || 225)}
-                        onInput=${v => set('dataset.max_token_length', parseInt(v, 10))}
-                        options=${[['75','75'],['150','150'],['225','225']]} />
+                    <${Select} value=${cfg.dataset.max_token_length == null ? 'none' : String(cfg.dataset.max_token_length)}
+                        onInput=${v => set('dataset.max_token_length', v === 'none' ? null : parseInt(v, 10))}
+                        options=${[['none','без лимита'],['75','75'],['150','150'],['225','225']]} />
                 </${Field}>
+                `}
                 <${Field} label="max_data_loader_n_workers" tipKey="dataset.max_data_loader_n_workers">
                     <${Num} value=${cfg.dataset.max_data_loader_n_workers ?? 8} min=${0} max=${32}
                         onInput=${v => set('dataset.max_data_loader_n_workers', v)} />
@@ -519,7 +521,7 @@ const SectionNetwork = ({ cfg, set, val }) => {
                         warn=${isAlphaWarn} />
                 </${Field}>
             </div>
-            ${isLycoris && html`
+            ${isLycoris && cfg.model.arch !== 'anima' && html`
                 <div class="grid-3">
                     <${Field} label="preset" tipKey="network.preset">
                         <${Select} value=${n.preset} onInput=${v => set('network.preset', v)}
@@ -902,6 +904,34 @@ const SectionSamples = ({ cfg, set, val }) => {
 // =============================================================================
 const SectionGallery = ({ cfg, samples, refresh }) => {
     const [zoom, setZoom] = useState(null);
+    const [syncing, setSyncing] = useState(false);
+    const [syncMsg, setSyncMsg] = useState('');
+    const [syncEnabled, setSyncEnabled] = useState(false);
+
+    useEffect(() => {
+        api.syncStatus().then(s => { setSyncEnabled(s.enabled); }).catch(() => {});
+    }, []);
+
+    const pushNow = async () => {
+        try {
+            setSyncing(true); setSyncMsg('запущено…');
+            const r = await api.syncPush();
+            if (r.skipped) setSyncMsg('output уже на Drive — синк не нужен');
+            else if (r.already_running) setSyncMsg('уже идёт фоновый синк');
+            else setSyncMsg('запущено в фоне, ~30-120 с');
+            // poll until finished
+            const t = setInterval(async () => {
+                try {
+                    const s = await api.syncStatus();
+                    if (!s.running) {
+                        clearInterval(t);
+                        setSyncing(false);
+                        setSyncMsg(s.last_msg === 'ok' ? '✓ синхронизировано' : `✗ ${s.last_msg || 'неизвестно'}`);
+                    }
+                } catch { clearInterval(t); setSyncing(false); }
+            }, 1500);
+        } catch (e) { setSyncing(false); setSyncMsg(`✗ ${e.message}`); }
+    };
 
     // Group by prompt index; within each prompt show a wrapping grid of
     // sample tiles sorted by epoch descending (newest first). Tile label is
@@ -941,6 +971,14 @@ const SectionGallery = ({ cfg, samples, refresh }) => {
         <div class="subtitle">
             ${samples.length} картинок · группировка по промптам, новые эпохи сверху.
             <button class="btn btn-sm btn-ghost" style="margin-left:8px;" onClick=${refresh}>↻ Обновить</button>
+            ${syncEnabled && html`
+                <button class="btn btn-sm btn-ghost" style="margin-left:4px;"
+                    disabled=${syncing} onClick=${pushNow}
+                    title="Скинуть локальный output (чекпоинты + сэмплы) на Google Drive">
+                    ${syncing ? '⟳ Sync…' : '↑ Push to Drive'}
+                </button>
+                ${syncMsg && html`<span class="dim" style="margin-left:8px;font-size:11px;">${syncMsg}</span>`}
+            `}
         </div>
 
         ${samples.length === 0
