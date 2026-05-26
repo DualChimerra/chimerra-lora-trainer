@@ -773,7 +773,7 @@ const SectionTraining = ({ cfg, set, val }) => {
                     <div class="grid-3">
                         <${Field} label="weighting_scheme" tipKey="training.weighting_scheme">
                             <${Select} value=${cfg.training.weighting_scheme} onInput=${v => set('training.weighting_scheme', v)}
-                                options=${['sigma_sqrt','logit_normal','mode','cosmap','none']} />
+                                options=${['uniform','sigma_sqrt','logit_normal','mode','cosmap','none']} />
                         </${Field}>
                         <${Field} label="timestep_sampling" tipKey="training.timestep_sampling">
                             <${Select} value=${cfg.training.timestep_sampling} onInput=${v => set('training.timestep_sampling', v)}
