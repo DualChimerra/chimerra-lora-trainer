@@ -38,6 +38,9 @@ export const api = {
     trainStop:   () => req('POST', '/api/train/stop'),
     trainStatus: () => req('GET',  '/api/train/status'),
     clearLogs:   () => req('POST', '/api/train/clear_logs'),
+
+    syncStatus:  () => req('GET',  '/api/sync/status'),
+    syncPush:    () => req('POST', '/api/sync/push_to_drive'),
 };
 
 export function openSocket(onEvent) {

@@ -222,6 +222,48 @@ def make_app() -> FastAPI:
             headers={"Cache-Control": "public, max-age=86400, immutable"},
         )
 
+    # Manual local→Drive sync. Triggered by a button in the UI because the
+    # Colab kernel queue is permanently blocked by the UI cell, so users can't
+    # just call push_to_drive() interactively. The FastAPI process is separate,
+    # so this works even while training runs.
+    _sync_state = {"running": False, "last_at": 0.0, "last_msg": ""}
+
+    @app.post("/api/sync/push_to_drive")
+    def api_sync_push():
+        import subprocess, threading
+        src = os.environ.get("LT_OUTPUT_ROOT", "").strip()
+        dst = os.environ.get("LT_DRIVE_OUTPUT_ROOT", "").strip()
+        if not src or not dst:
+            raise HTTPException(400, "local output or drive output not configured (run the local-cache cell first)")
+        if src.rstrip("/") == dst.rstrip("/"):
+            return {"ok": True, "skipped": "local==drive", **_sync_state}
+        if _sync_state["running"]:
+            return {"ok": True, "already_running": True, **_sync_state}
+        def _run():
+            _sync_state["running"] = True
+            try:
+                r = subprocess.run(
+                    ["rsync", "-a", "--quiet", src.rstrip("/") + "/", dst.rstrip("/") + "/"],
+                    timeout=3600,
+                )
+                _sync_state["last_msg"] = "ok" if r.returncode == 0 else f"rsync exit {r.returncode}"
+            except Exception as e:
+                _sync_state["last_msg"] = f"error: {e}"
+            finally:
+                _sync_state["last_at"] = time.time()
+                _sync_state["running"] = False
+        threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "started": True, **_sync_state}
+
+    @app.get("/api/sync/status")
+    def api_sync_status():
+        return {
+            "enabled": bool(os.environ.get("LT_DRIVE_OUTPUT_ROOT", "").strip()),
+            "src": os.environ.get("LT_OUTPUT_ROOT", ""),
+            "dst": os.environ.get("LT_DRIVE_OUTPUT_ROOT", ""),
+            **_sync_state,
+        }
+
     @app.get("/api/calc/total_steps")
     def api_calc_total_steps():
         return {"total_steps": compute_total_steps(get_cfg())}
