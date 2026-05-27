@@ -1217,7 +1217,7 @@ const StatPanel = ({ cfg, status, totalSteps, etaSec }) => {
 // =============================================================================
 // Topbar
 // =============================================================================
-const TopBar = ({ cfg, status, onStart, onStop, dirty, onSaveConfig }) => html`
+const TopBar = ({ cfg, status, onStart, onStop, dirty, onSaveConfig, onCleanup }) => html`
     <div class="topbar">
         <div class="brand">
             <span class="dot"></span>
@@ -1235,6 +1235,7 @@ const TopBar = ({ cfg, status, onStart, onStop, dirty, onSaveConfig }) => html`
         <div class="grow"></div>
         <div class="actions">
             ${dirty && html`<span class="state-pill" title="несохранённые изменения"><span class="dot" style="background: var(--warn);"></span>изменения</span>`}
+            <button class="btn btn-ghost" onClick=${onCleanup} title="Удалить сэмплы, LoRA, .lora_trainer и кэш миниатюр (локально, Drive не трогается)" disabled=${status.state === 'running' || status.state === 'starting'}>Очистка файлов</button>
             <button class="btn btn-ghost" onClick=${onSaveConfig}>Сохранить</button>
             ${status.state === 'running' || status.state === 'starting'
                 ? html`<button class="btn btn-danger" onClick=${onStop}>■ Стоп</button>`
@@ -1412,6 +1413,25 @@ const App = () => {
         try { await api.putConfig(cfg); setDirty(false); toast('ok', 'Конфиг сохранён'); }
         catch (e) { toast('err', String(e.message)); }
     };
+    const onCleanup = async () => {
+        const msg = 'Удалить локальные файлы?\n\n'
+            + '• сэмплы (output_root/sample, samples_root)\n'
+            + '• обученные LoRA (*.safetensors в output_root)\n'
+            + '• папку .lora_trainer (конфиг + пресеты)\n'
+            + '• кэш миниатюр\n\n'
+            + 'Файлы на Google Drive не затрагиваются. Операция необратима.';
+        if (!window.confirm(msg)) return;
+        try {
+            const r = await api.cleanup();
+            const rm = r.removed || {};
+            toast('ok', `Удалено: сэмплы ${rm.samples||0}, LoRA ${rm.loras||0}, кэш ${rm.thumb_cache||0}`);
+            if (r.errors && r.errors.length) {
+                toast('warn', `Ошибок: ${r.errors.length} (см. консоль)`);
+                console.warn('[cleanup] errors:', r.errors);
+            }
+            await Promise.all([refreshOutputs(cfg), refreshSamples(cfg), refreshPresets()]);
+        } catch (e) { toast('err', String(e.message)); }
+    };
 
     const val = useMemo(() => {
         if (!cfg) return { errors: [], warnings: [], errMap: {}, warnMap: {} };
@@ -1445,7 +1465,7 @@ const App = () => {
 
     return html`
         <div class="app">
-            <${TopBar} cfg=${cfg} status=${status} onStart=${onStart} onStop=${onStop} dirty=${dirty} onSaveConfig=${onSaveConfig} />
+            <${TopBar} cfg=${cfg} status=${status} onStart=${onStart} onStop=${onStop} dirty=${dirty} onSaveConfig=${onSaveConfig} onCleanup=${onCleanup} />
 
             <aside class="sidebar">
                 <div class="group-label">Настройки</div>
