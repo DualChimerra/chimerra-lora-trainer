@@ -317,6 +317,82 @@ def make_app() -> FastAPI:
         trainer.clear_logs()
         return {"ok": True}
 
+    # Wipe local artifacts: samples, trained LoRA files, .lora_trainer state dir,
+    # and the thumb cache. Operates on output_root/samples_root (which on Colab
+    # point at the local SSD cache), NOT the Drive mirror.
+    @app.post("/api/cleanup")
+    def api_cleanup():
+        import shutil
+        if trainer.status.state in ("running", "starting"):
+            raise HTTPException(409, "training is running — stop it first")
+
+        cfg = get_cfg()
+        removed = {"samples": 0, "loras": 0, "state_dirs": 0, "thumb_cache": 0}
+        errors: list[str] = []
+
+        def _rm_dir(p: Path) -> bool:
+            try:
+                if p.is_dir():
+                    shutil.rmtree(p)
+                    return True
+            except Exception as e:
+                errors.append(f"{p}: {e}")
+            return False
+
+        def _rm_file(p: Path) -> bool:
+            try:
+                p.unlink()
+                return True
+            except Exception as e:
+                errors.append(f"{p}: {e}")
+            return False
+
+        # samples: kohya writes to <output_root>/sample; samples_root may hold copies
+        sample_dirs: list[Path] = []
+        if cfg.paths.output_root:
+            sample_dirs.append(Path(cfg.paths.output_root) / "sample")
+        if cfg.paths.samples_root:
+            sample_dirs.append(Path(cfg.paths.samples_root))
+        for d in sample_dirs:
+            if not d.is_dir():
+                continue
+            for entry in d.iterdir():
+                if entry.is_file() and entry.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                    if _rm_file(entry):
+                        removed["samples"] += 1
+
+        # trained LoRA files under output_root (recursive, skip the state dir)
+        if cfg.paths.output_root:
+            out_root = Path(cfg.paths.output_root)
+            state_subdir = out_root / ".lora_trainer"
+            if out_root.is_dir():
+                for f in out_root.rglob("*.safetensors"):
+                    try:
+                        f.relative_to(state_subdir)
+                        continue  # inside state dir, handled below
+                    except ValueError:
+                        pass
+                    if _rm_file(f):
+                        removed["loras"] += 1
+
+        # .lora_trainer dirs (state + presets). Wipe both primary and fallback.
+        for d in {state.dir, state.primary, state.fallback}:
+            if _rm_dir(d):
+                removed["state_dirs"] += 1
+        # re-create an empty state dir so subsequent saves work
+        try:
+            state._ensure()
+        except Exception as e:
+            errors.append(f"state re-init: {e}")
+
+        # thumb cache
+        if THUMB_CACHE.is_dir():
+            for f in THUMB_CACHE.iterdir():
+                if f.is_file() and _rm_file(f):
+                    removed["thumb_cache"] += 1
+
+        return {"ok": True, "removed": removed, "errors": errors}
+
     # ------------------------------------------------------------------
     # WebSocket
     # ------------------------------------------------------------------
