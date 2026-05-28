@@ -777,7 +777,7 @@ const SectionTraining = ({ cfg, set, val }) => {
                         </${Field}>
                         <${Field} label="timestep_sampling" tipKey="training.timestep_sampling">
                             <${Select} value=${cfg.training.timestep_sampling} onInput=${v => set('training.timestep_sampling', v)}
-                                options=${['uniform','sigmoid','shift','flux_shift']} />
+                                options=${['sigma','uniform','sigmoid','shift','flux_shift','logit_normal']} />
                         </${Field}>
                         <${Field} label="discrete_flow_shift" tipKey="training.discrete_flow_shift">
                             <${Num} value=${cfg.training.discrete_flow_shift} step=${0.1} onInput=${v => set('training.discrete_flow_shift', v)} />
