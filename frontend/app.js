@@ -594,7 +594,7 @@ const SectionNetwork = ({ cfg, set, val }) => {
 // =============================================================================
 const SectionTraining = ({ cfg, set, val }) => {
     const opts = ['AdamW','AdamW8bit','Lion','Lion8bit','Prodigy','DAdaptation','DAdaptAdam','DAdaptLion',
-                  'SGDNesterov','SGDNesterov8bit','AdaFactor','PagedAdamW8bit','PagedLion8bit','came_pytorch.CAME'];
+                  'SGDNesterov','SGDNesterov8bit','AdaFactor','PagedAdamW8bit','PagedLion8bit','pytorch_optimizer.CAME'];
     const isAnima = cfg.model.arch === 'anima';
     return html`
         <h2>Оптимизатор и обучение</h2>
