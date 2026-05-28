@@ -283,8 +283,13 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
         argv.append("--lr_scheduler_args")
         argv.extend(str(a) for a in cfg.optimizer.lr_scheduler_args)
     add("lr_warmup_steps", cfg.optimizer.lr_warmup_steps)
-    if cfg.optimizer.lr_decay_steps is not None:
-        add("lr_decay_steps", cfg.optimizer.lr_decay_steps)
+    # Only warmup_stable_decay consumes lr_decay_steps. Emitting it for other
+    # schedulers trips kohya's int_or_float parser (e.g. "1.0" -> int("1.0")
+    # raises). Whole numbers must be emitted as int, fractions as float.
+    if (cfg.optimizer.lr_scheduler == "warmup_stable_decay"
+            and cfg.optimizer.lr_decay_steps is not None):
+        ds = cfg.optimizer.lr_decay_steps
+        add("lr_decay_steps", int(ds) if ds >= 1 else ds)
     add("lr_scheduler_num_cycles", cfg.optimizer.lr_scheduler_num_cycles)
     add("lr_scheduler_power", cfg.optimizer.lr_scheduler_power)
     if cfg.optimizer.max_grad_norm is not None:
