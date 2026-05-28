@@ -145,7 +145,7 @@ OptimizerType = Literal[
 LrScheduler = Literal[
     "constant", "constant_with_warmup", "linear",
     "cosine", "cosine_with_restarts", "polynomial",
-    "adafactor", "rex",
+    "adafactor", "warmup_stable_decay",
 ]
 MixedPrecision = Literal["no", "fp16", "bf16"]
 
@@ -159,6 +159,10 @@ class OptimizerSection(BaseModel):
     lr_scheduler: LrScheduler = "cosine"
     lr_scheduler_args: List[str] = Field(default_factory=list)
     lr_warmup_steps: int = 0
+    # WSD only: length of the final decay phase. Float in (0,1] = fraction of
+    # total steps (0.2 = last 20%); int = absolute steps. Required by kohya for
+    # warmup_stable_decay, ignored by other schedulers.
+    lr_decay_steps: Optional[float] = None
     lr_scheduler_num_cycles: int = 1
     lr_scheduler_power: float = 1.0
     max_grad_norm: float = 1.0
