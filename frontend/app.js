@@ -113,6 +113,52 @@ function computeTotalStepsLocal(cfg) {
     return perEpoch * Math.max(1, cfg.training.max_train_epochs);
 }
 
+// Normalized LR shape (y in 0..1, peak = configured learning_rate) over the run.
+// Mirrors kohya/transformers scheduler math. Returns [] when not plottable.
+function lrCurvePoints(cfg, totalSteps, n = 240) {
+    if (!totalSteps || totalSteps <= 0) return [];
+    const o = cfg.optimizer;
+    const sched = o.lr_scheduler;
+    if (sched === 'adafactor') return []; // optimizer-internal, no static curve
+    const ws = o.lr_warmup_steps || 0;
+    const warm = ws > 0 && ws < 1 ? ws : ws / totalSteps; // fraction of total
+    const cycles = Math.max(1, o.lr_scheduler_num_cycles || 1);
+    const power = o.lr_scheduler_power > 0 ? o.lr_scheduler_power : 1.0;
+    const ds = o.lr_decay_steps;
+    const decayFrac = ds == null ? 0 : (ds > 0 && ds < 1 ? ds : ds / totalSteps);
+
+    const val = (x) => {
+        if (warm > 0 && x < warm) return x / warm;          // linear warmup
+        const p = warm >= 1 ? 1 : (x - warm) / (1 - warm);  // post-warmup progress 0..1
+        switch (sched) {
+            case 'constant':
+            case 'constant_with_warmup': return 1;
+            case 'linear': return Math.max(0, 1 - p);
+            case 'cosine': return 0.5 * (1 + Math.cos(Math.PI * p));
+            case 'cosine_with_restarts': {
+                let ph = (cycles * p) % 1;
+                if (p > 0 && ph === 0) ph = 1; // cycle boundary = trough, not a jump to peak
+                return 0.5 * (1 + Math.cos(Math.PI * ph));
+            }
+            case 'polynomial': return Math.pow(Math.max(0, 1 - p), power);
+            case 'warmup_stable_decay': {
+                const start = 1 - decayFrac;
+                if (decayFrac <= 0 || x < start) return 1;       // stable plateau
+                const d = Math.min(1, (x - start) / decayFrac);
+                return 0.5 * (1 + Math.cos(Math.PI * d));         // short cosine decay
+            }
+            default: return 0.5 * (1 + Math.cos(Math.PI * p));
+        }
+    };
+
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+        const x = i / n;
+        pts.push({ x, y: Math.max(0, Math.min(1, val(x))) });
+    }
+    return pts;
+}
+
 // =============================================================================
 // generic widgets
 // =============================================================================
@@ -1171,7 +1217,72 @@ const SectionPresets = ({ cfg, applyPatch, replaceCfg, presets, refresh }) => {
 // =============================================================================
 // Right stats panel
 // =============================================================================
-const StatPanel = ({ cfg, status, totalSteps, etaSec }) => {
+const LrChart = ({ cfg, totalSteps, status, lrTrace }) => {
+    const W = 300, H = 140, padX = 10, padTop = 10, padBot = 18;
+    const plotW = W - padX * 2, plotH = H - padTop - padBot;
+    const X = (xf) => padX + Math.max(0, Math.min(1, xf)) * plotW;
+    const Y = (yn) => padTop + (1 - Math.max(0, Math.min(1, yn))) * plotH;
+
+    const sched = cfg.optimizer.lr_scheduler;
+    const pts = lrCurvePoints(cfg, totalSteps);
+    const epochs = Math.max(1, cfg.training.max_train_epochs);
+    const saveEvery = cfg.training.save_every_n_epochs || 0;
+    const peakLr = Math.max(cfg.optimizer.learning_rate || 0,
+                            cfg.optimizer.unet_lr || 0,
+                            cfg.optimizer.text_encoder_lr || 0) || 1e-9;
+
+    if (sched === 'adafactor' || pts.length === 0) {
+        return html`<div class="dim" style="font-size:11.5px;">
+            График LR недоступен для adafactor (LR задаётся самим оптимизатором).
+        </div>`;
+    }
+
+    const planned = pts.map(p => `${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ');
+
+    // save-point ticks (skip if too dense)
+    const saveLines = [];
+    if (saveEvery > 0 && Math.floor(epochs / saveEvery) <= 50) {
+        for (let e = saveEvery; e <= epochs; e += saveEvery) {
+            const xf = e / epochs;
+            saveLines.push(X(xf));
+        }
+    }
+
+    // actual LR trace (normalized by peak)
+    const trace = (lrTrace || []).filter(p => p.lr != null && p.step > 0);
+    const actual = trace.length >= 2
+        ? trace.map(p => `${X(p.step / totalSteps).toFixed(1)},${Y(p.lr / peakLr).toFixed(1)}`).join(' ')
+        : null;
+
+    // current position
+    const running = status.state === 'running' || status.state === 'starting';
+    const curX = totalSteps > 0 && status.step > 0 ? X(status.step / totalSteps) : null;
+
+    return html`
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto; display:block;">
+            <rect x=${padX} y=${padTop} width=${plotW} height=${plotH} fill="none"
+                stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+            ${saveLines.map(x => html`<line x1=${x} y1=${padTop} x2=${x} y2=${padTop + plotH}
+                stroke="rgba(255,255,255,0.10)" stroke-width="1"/>`)}
+            <polyline points=${planned} fill="none" stroke="#5fb04a" stroke-width="2"
+                stroke-linejoin="round"/>
+            ${actual && html`<polyline points=${actual} fill="none" stroke="#e8a33d"
+                stroke-width="1.6" stroke-linejoin="round" opacity="0.9"/>`}
+            ${curX != null && html`<line x1=${curX} y1=${padTop} x2=${curX} y2=${padTop + plotH}
+                stroke="#ff5d5d" stroke-width="1.5"/>`}
+            <text x=${padX} y=${padTop - 2} fill="rgba(255,255,255,0.5)" font-size="9">LR</text>
+            <text x=${W - padX} y=${H - 5} text-anchor="end" fill="rgba(255,255,255,0.5)"
+                font-size="9">шаги · ${totalSteps}</text>
+        </svg>
+        <div class="dim" style="font-size:11px; display:flex; gap:12px; flex-wrap:wrap; margin-top:2px;">
+            <span style="color:#5fb04a;">— план (${sched})</span>
+            ${actual && html`<span style="color:#e8a33d;">— факт</span>`}
+            ${curX != null && html`<span style="color:#ff5d5d;">| сейчас ${Math.round(status.step / totalSteps * 100)}%</span>`}
+        </div>
+    `;
+};
+
+const StatPanel = ({ cfg, status, totalSteps, etaSec, lrTrace }) => {
     const pct = totalSteps > 0 ? Math.min(100, (status.step / totalSteps) * 100) : 0;
     const stateLabel = {
         idle: 'не запущено',
@@ -1215,6 +1326,11 @@ const StatPanel = ({ cfg, status, totalSteps, etaSec }) => {
             <div class="dim" style="font-size:11.5px;">
                 Оценка времени берётся из реальных шагов в логах. До старта обучения ETA = «—».
             </div>
+        </div>
+
+        <div class="stat-card">
+            <div style="font-weight:600; margin-bottom:6px;">График LR</div>
+            <${LrChart} cfg=${cfg} totalSteps=${totalSteps} status=${status} lrTrace=${lrTrace} />
         </div>
     `;
 };
@@ -1269,6 +1385,7 @@ const App = () => {
     const [cfg, setCfg] = useState(null);
     const [section, setSection] = useState('project');
     const [status, setStatus] = useState({ state: 'idle', step: 0, total_steps: 0, epoch: 0 });
+    const [lrTrace, setLrTrace] = useState([]);
     const [logs, setLogs] = useState([]);
     const [presets, setPresets] = useState([]);
     const [outputs, setOutputs] = useState([]);
@@ -1295,7 +1412,19 @@ const App = () => {
                 if (ev.tail) setLogs(ev.tail);
                 return;
             }
-            if (ev.type === 'status') setStatus(ev.status);
+            if (ev.type === 'status') {
+                setStatus(ev.status);
+                const st = ev.status;
+                if (st && st.step > 0 && st.lr != null) {
+                    setLrTrace(prev => {
+                        const last = prev[prev.length - 1];
+                        if (last && last.step === st.step) return prev;
+                        if (last && st.step < last.step) return [{ step: st.step, lr: st.lr }]; // new run
+                        const next = [...prev, { step: st.step, lr: st.lr }];
+                        return next.length > 2000 ? next.slice(-2000) : next;
+                    });
+                }
+            }
             if (ev.type === 'log') setLogs(prev => {
                 const next = [...prev, ev];
                 return next.length > 5000 ? next.slice(-5000) : next;
@@ -1410,6 +1539,7 @@ const App = () => {
             await api.putConfig(cfg);
             await api.trainStart();
             setLogs([]);
+            setLrTrace([]);
             toast('ok', 'Обучение запущено');
         } catch (e) { toast('err', String(e.message)); }
     };
@@ -1500,7 +1630,7 @@ const App = () => {
             <main class="main">${SectionEl}</main>
 
             <aside class="statbar">
-                <${StatPanel} cfg=${cfg} status=${status} totalSteps=${totalSteps} />
+                <${StatPanel} cfg=${cfg} status=${status} totalSteps=${totalSteps} lrTrace=${lrTrace} />
             </aside>
         </div>
 
