@@ -81,7 +81,7 @@ export const TIPS = {
     'optimizer.learning_rate':'Базовый LR. Для Prodigy/DAdaptation = 1.0.',
     'optimizer.unet_lr':    'Отдельный LR для UNet (по умолчанию = learning_rate).',
     'optimizer.text_encoder_lr':'Отдельный LR для Text Encoder. Обычно меньше unet_lr.',
-    'optimizer.lr_scheduler':'cosine — самый частый выбор для LoRA. warmup_stable_decay (WSD) — разогрев → постоянный LR через всю середину → короткий резкий спад в конце (требует lr_decay_steps).',
+    'optimizer.lr_scheduler':'cosine — самый частый выбор для LoRA. warmup_stable_decay (WSD) — разогрев → постоянный LR через всю середину → короткий резкий спад в конце (требует lr_decay_steps). piecewise_constant — ручные ступени: тяни точки на графике ниже.',
     'optimizer.lr_warmup_steps':'Сколько шагов с линейным разогревом LR от 0.',
     'optimizer.lr_decay_steps':'Только для WSD: длина финальной фазы спада. Доля 0–1 (0.2 = последние 20% шагов) или абсолютное число шагов (≥1). Меньше доля = резче обрыв.',
     'optimizer.lr_scheduler_num_cycles':'Циклы для cosine_with_restarts.',

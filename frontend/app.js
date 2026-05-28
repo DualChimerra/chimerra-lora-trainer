@@ -113,6 +113,16 @@ function computeTotalStepsLocal(cfg) {
     return perEpoch * Math.max(1, cfg.training.max_train_epochs);
 }
 
+// Step multiplier at fraction x for piecewise_constant (kohya semantics:
+// a level holds from its `at` until the next point's `at`).
+function piecewiseMult(points, x) {
+    const pts = [...(points || [])].sort((a, b) => a.at - b.at);
+    if (pts.length === 0) return 1;
+    let m = pts[0].mult;
+    for (const p of pts) { if (x >= p.at) m = p.mult; else break; }
+    return Math.max(0, Math.min(1, m));
+}
+
 // Normalized LR shape (y in 0..1, peak = configured learning_rate) over the run.
 // Mirrors kohya/transformers scheduler math. Returns [] when not plottable.
 function lrCurvePoints(cfg, totalSteps, n = 240) {
@@ -128,6 +138,7 @@ function lrCurvePoints(cfg, totalSteps, n = 240) {
     const decayFrac = ds == null ? 0 : (ds > 0 && ds < 1 ? ds : ds / totalSteps);
 
     const val = (x) => {
+        if (sched === 'piecewise_constant') return piecewiseMult(o.lr_piecewise || [], x);
         if (warm > 0 && x < warm) return x / warm;          // linear warmup
         const p = warm >= 1 ? 1 : (x - warm) / (1 - warm);  // post-warmup progress 0..1
         switch (sched) {
@@ -638,6 +649,85 @@ const SectionNetwork = ({ cfg, set, val }) => {
 // =============================================================================
 // Section: OPTIMIZER / TRAINING
 // =============================================================================
+// Interactive editor for piecewise_constant: drag handles to set levels;
+// numbers (step/epoch · multiplier) are derived automatically.
+const PiecewiseEditor = ({ cfg, set }) => {
+    const totalSteps = computeTotalStepsLocal(cfg);
+    const epochs = Math.max(1, cfg.training.max_train_epochs);
+    const pts = cfg.optimizer.lr_piecewise || [];
+    const svgRef = useRef(null);
+    const [drag, setDrag] = useState(-1);
+
+    const W = 560, H = 200, padX = 14, padTop = 14, padBot = 24;
+    const plotW = W - padX * 2, plotH = H - padTop - padBot;
+    const X = (at) => padX + Math.max(0, Math.min(1, at)) * plotW;
+    const Y = (m) => padTop + (1 - Math.max(0, Math.min(1, m))) * plotH;
+    const r2 = (v) => Math.round(v * 100) / 100;
+
+    const toFrac = (evt) => {
+        const rect = svgRef.current.getBoundingClientRect();
+        const at = ((evt.clientX - rect.left) / rect.width * W - padX) / plotW;
+        const m = 1 - ((evt.clientY - rect.top) / rect.height * H - padTop) / plotH;
+        return { at: Math.max(0, Math.min(1, at)), mult: Math.max(0.01, Math.min(1, m)) };
+    };
+    const update = (arr) => set('optimizer.lr_piecewise', arr);
+
+    const onDown = (i) => (e) => {
+        e.stopPropagation();
+        svgRef.current.setPointerCapture(e.pointerId);
+        setDrag(i);
+    };
+    const onMove = (e) => {
+        if (drag < 0) return;
+        const f = toFrac(e);
+        update(pts.map((p, i) => i === drag ? { at: r2(f.at), mult: r2(f.mult) } : p));
+    };
+    const onUp = () => setDrag(-1);
+    const addPoint = (e) => {
+        const f = toFrac(e);
+        update([...pts, { at: r2(f.at), mult: r2(f.mult) }]);
+    };
+    const removePoint = (i) => (e) => {
+        e.stopPropagation();
+        if (pts.length > 2) update(pts.filter((_, j) => j !== i));
+    };
+
+    const sorted = [...pts].sort((a, b) => a.at - b.at);
+    // step polyline
+    const poly = [];
+    let prev = sorted.length ? sorted[0].mult : 1;
+    poly.push([0, prev]);
+    for (const p of sorted) { poly.push([p.at, prev]); poly.push([p.at, p.mult]); prev = p.mult; }
+    poly.push([1, prev]);
+    const polyStr = poly.map(([x, m]) => `${X(x).toFixed(1)},${Y(m).toFixed(1)}`).join(' ');
+
+    return html`
+        <div class="card" style="margin-top:8px;">
+            <div style="font-weight:600; margin-bottom:4px;">Кастомный график LR (piecewise)</div>
+            <div class="dim" style="font-size:11.5px; margin-bottom:6px;">
+                Тяни точки мышкой · клик по пустому месту — добавить точку · двойной клик по точке — удалить.
+                Уровень держится от своей точки до следующей.
+            </div>
+            <svg ref=${svgRef} viewBox="0 0 ${W} ${H}" style="width:100%; height:auto; display:block; touch-action:none; cursor:crosshair;"
+                onPointerMove=${onMove} onPointerUp=${onUp} onPointerLeave=${onUp}>
+                <rect x=${padX} y=${padTop} width=${plotW} height=${plotH} fill="rgba(255,255,255,0.02)"
+                    stroke="rgba(255,255,255,0.12)" stroke-width="1" onClick=${addPoint}/>
+                ${[0.25, 0.5, 0.75].map(g => html`<line x1=${X(g)} y1=${padTop} x2=${X(g)} y2=${padTop + plotH}
+                    stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`)}
+                <polyline points=${polyStr} fill="none" stroke="#5fb04a" stroke-width="2" stroke-linejoin="round"/>
+                ${pts.map((p, i) => html`<circle cx=${X(p.at)} cy=${Y(p.mult)} r="6"
+                    fill=${drag === i ? '#ffd24a' : '#5fb04a'} stroke="#1c1c1c" stroke-width="1.5"
+                    style="cursor:grab;" onPointerDown=${onDown(i)} onDblClick=${removePoint(i)}/>`)}
+                <text x=${padX} y=${padTop - 3} fill="rgba(255,255,255,0.5)" font-size="9">LR ×</text>
+                <text x=${W - padX} y=${H - 6} text-anchor="end" fill="rgba(255,255,255,0.5)" font-size="9">шаги · ${totalSteps}</text>
+            </svg>
+            <div class="dim" style="font-size:11.5px; display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
+                ${sorted.map(p => html`<span style="background:rgba(95,176,74,0.15); padding:2px 6px; border-radius:4px;">
+                    эп ${Math.round(p.at * epochs)} · шаг ${Math.round(p.at * totalSteps)} → ×${p.mult}</span>`)}
+            </div>
+        </div>`;
+};
+
 const SectionTraining = ({ cfg, set, val }) => {
     const opts = ['AdamW','AdamW8bit','Lion','Lion8bit','Prodigy','DAdaptation','DAdaptAdam','DAdaptLion',
                   'SGDNesterov','SGDNesterov8bit','AdaFactor','PagedAdamW8bit','PagedLion8bit','pytorch_optimizer.CAME'];
@@ -660,7 +750,7 @@ const SectionTraining = ({ cfg, set, val }) => {
                 </${Field}>
                 <${Field} label="lr_scheduler" tipKey="optimizer.lr_scheduler">
                     <${Select} value=${cfg.optimizer.lr_scheduler} onInput=${v => set('optimizer.lr_scheduler', v)}
-                        options=${['constant','constant_with_warmup','linear','cosine','cosine_with_restarts','polynomial','adafactor','warmup_stable_decay']} />
+                        options=${['constant','constant_with_warmup','linear','cosine','cosine_with_restarts','polynomial','adafactor','warmup_stable_decay','piecewise_constant']} />
                 </${Field}>
             </div>
             <div class="grid-3">
@@ -690,6 +780,7 @@ const SectionTraining = ({ cfg, set, val }) => {
                         onInput=${v => set('optimizer.max_grad_norm', v)} />
                 </${Field}>
             </div>
+            ${cfg.optimizer.lr_scheduler === 'piecewise_constant' && html`<${PiecewiseEditor} cfg=${cfg} set=${set} />`}
             <${Field} label="optimizer_args" tipKey="optimizer.optimizer_args" columns="stack">
                 <textarea placeholder=${"weight_decay=0.1\nbetas=0.9,0.999"}
                     value=${(cfg.optimizer.optimizer_args || []).join('\n')}

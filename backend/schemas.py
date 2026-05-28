@@ -145,9 +145,14 @@ OptimizerType = Literal[
 LrScheduler = Literal[
     "constant", "constant_with_warmup", "linear",
     "cosine", "cosine_with_restarts", "polynomial",
-    "adafactor", "warmup_stable_decay",
+    "adafactor", "warmup_stable_decay", "piecewise_constant",
 ]
 MixedPrecision = Literal["no", "fp16", "bf16"]
+
+
+class PiecewisePoint(BaseModel):
+    at: float = 0.0    # fraction of total steps where this level begins (0..1)
+    mult: float = 1.0  # LR multiplier for this level (0..1)
 
 
 class OptimizerSection(BaseModel):
@@ -163,6 +168,14 @@ class OptimizerSection(BaseModel):
     # total steps (0.2 = last 20%); int = absolute steps. Required by kohya for
     # warmup_stable_decay, ignored by other schedulers.
     lr_decay_steps: Optional[float] = None
+    # piecewise_constant only: user-drawn LR levels. Each point = (at, mult);
+    # the level holds `mult` from its `at` until the next point's `at`. Only
+    # consumed when lr_scheduler == "piecewise_constant".
+    lr_piecewise: List[PiecewisePoint] = Field(default_factory=lambda: [
+        PiecewisePoint(at=0.0, mult=1.0),
+        PiecewisePoint(at=0.5, mult=0.3),
+        PiecewisePoint(at=0.8, mult=0.1),
+    ])
     lr_scheduler_num_cycles: int = 1
     lr_scheduler_power: float = 1.0
     max_grad_norm: float = 1.0

@@ -117,6 +117,29 @@ def write_sample_prompts(samples: SamplesSection, dest: Path) -> Optional[Path]:
 # ---------------------------------------------------------------------------
 # Total steps (mirrors kohya's accounting; used for ETA & UI display)
 # ---------------------------------------------------------------------------
+def _piecewise_step_rules(points, total_steps: int) -> str:
+    """Build kohya/diffusers `step_rules` from drawn levels.
+
+    Each point (at, mult): the level holds `mult` from its step until the next
+    point's step. Format: "m0:thr1,m1:thr2,...,mLast" where thrN are absolute
+    steps and mLast is the trailing multiplier.
+    """
+    if not points or total_steps <= 0:
+        return ""
+    pts = sorted(({"at": max(0.0, min(1.0, p.at)), "mult": p.mult} for p in points),
+                 key=lambda p: p["at"])
+    if pts[0]["at"] > 0:
+        pts.insert(0, {"at": 0.0, "mult": pts[0]["mult"]})
+    parts = []
+    for i in range(len(pts) - 1):
+        thr = int(round(pts[i + 1]["at"] * total_steps))
+        if thr <= 0:
+            continue
+        parts.append(f"{pts[i]['mult']}:{thr}")
+    parts.append(f"{pts[-1]['mult']}")  # trailing level
+    return ",".join(parts)
+
+
 def compute_total_steps(cfg: TrainConfig) -> int:
     ds = cfg.dataset
     tr = cfg.training
@@ -279,9 +302,17 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
     add("unet_lr", cfg.optimizer.unet_lr)
     add("text_encoder_lr", cfg.optimizer.text_encoder_lr)
     add("lr_scheduler", cfg.optimizer.lr_scheduler)
-    if cfg.optimizer.lr_scheduler_args:
+    sched_args = list(cfg.optimizer.lr_scheduler_args or [])
+    # piecewise_constant: emit step_rules ONLY for this scheduler so the drawn
+    # levels never leak into other schedulers. kohya literal_eval's each arg
+    # value, so the rules string must be quoted to come back as a str.
+    if cfg.optimizer.lr_scheduler == "piecewise_constant":
+        rules = _piecewise_step_rules(cfg.optimizer.lr_piecewise, compute_total_steps(cfg))
+        if rules:
+            sched_args.append(f'step_rules="{rules}"')
+    if sched_args:
         argv.append("--lr_scheduler_args")
-        argv.extend(str(a) for a in cfg.optimizer.lr_scheduler_args)
+        argv.extend(str(a) for a in sched_args)
     add("lr_warmup_steps", cfg.optimizer.lr_warmup_steps)
     # Only warmup_stable_decay consumes lr_decay_steps. Emitting it for other
     # schedulers trips kohya's int_or_float parser (e.g. "1.0" -> int("1.0")
