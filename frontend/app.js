@@ -614,7 +614,7 @@ const SectionTraining = ({ cfg, set, val }) => {
                 </${Field}>
                 <${Field} label="lr_scheduler" tipKey="optimizer.lr_scheduler">
                     <${Select} value=${cfg.optimizer.lr_scheduler} onInput=${v => set('optimizer.lr_scheduler', v)}
-                        options=${['constant','constant_with_warmup','linear','cosine','cosine_with_restarts','polynomial','adafactor','rex']} />
+                        options=${['constant','constant_with_warmup','linear','cosine','cosine_with_restarts','polynomial','adafactor','warmup_stable_decay']} />
                 </${Field}>
             </div>
             <div class="grid-3">
@@ -627,6 +627,11 @@ const SectionTraining = ({ cfg, set, val }) => {
                 <${Field} label="lr_warmup_steps" tipKey="optimizer.lr_warmup_steps">
                     <${Num} value=${cfg.optimizer.lr_warmup_steps} onInput=${v => set('optimizer.lr_warmup_steps', v)} />
                 </${Field}>
+                ${cfg.optimizer.lr_scheduler === 'warmup_stable_decay' && html`
+                    <${Field} label="lr_decay_steps" tipKey="optimizer.lr_decay_steps">
+                        <${Num} value=${cfg.optimizer.lr_decay_steps ?? ''} step=${0.05} min=${0}
+                            onInput=${v => set('optimizer.lr_decay_steps', v)} />
+                    </${Field}>`}
                 <${Field} label="lr_scheduler_num_cycles" tipKey="optimizer.lr_scheduler_num_cycles"
                     warn=${val.warnMap['optimizer.lr_scheduler_num_cycles']}>
                     <${Num} value=${cfg.optimizer.lr_scheduler_num_cycles} onInput=${v => set('optimizer.lr_scheduler_num_cycles', v)} />

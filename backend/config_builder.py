@@ -283,6 +283,8 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
         argv.append("--lr_scheduler_args")
         argv.extend(str(a) for a in cfg.optimizer.lr_scheduler_args)
     add("lr_warmup_steps", cfg.optimizer.lr_warmup_steps)
+    if cfg.optimizer.lr_decay_steps is not None:
+        add("lr_decay_steps", cfg.optimizer.lr_decay_steps)
     add("lr_scheduler_num_cycles", cfg.optimizer.lr_scheduler_num_cycles)
     add("lr_scheduler_power", cfg.optimizer.lr_scheduler_power)
     if cfg.optimizer.max_grad_norm is not None:
