@@ -119,7 +119,8 @@ export const TIPS = {
     'training.huber_c':'Параметр c для Huber-loss (0.1 типично).',
     'training.min_timestep':'Минимальный timestep при сэмплинге (0 = весь диапазон).',
     'training.max_timestep':'Максимальный timestep (1000 = весь диапазон). Уменьшение фокусирует на низком шуме.',
-    'training.weighting_scheme':'Anima: схема взвешивания timestep-ов.',
+    'training.weighting_scheme':'Anima: схема взвешивания timestep-ов (logit_normal управляется logit_mean/logit_std).',
+    'training.timestep_sampling':'Anima: метод выборки t (flux-style). logit_normal — логит-нормальная выборка (типичная пара к weighting_scheme=logit_normal).',
     'training.discrete_flow_shift':'Anima: дискретный shift для FlowMatch (3.0 типично).',
 
     // samples
