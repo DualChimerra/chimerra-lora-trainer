@@ -140,6 +140,7 @@ OptimizerType = Literal[
     "Prodigy", "DAdaptation", "DAdaptAdam", "DAdaptLion",
     "SGDNesterov", "SGDNesterov8bit",
     "AdaFactor", "PagedAdamW8bit", "PagedLion8bit",
+    "pytorch_optimizer.CAME",
 ]
 LrScheduler = Literal[
     "constant", "constant_with_warmup", "linear",
