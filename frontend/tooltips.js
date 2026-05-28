@@ -76,7 +76,7 @@ export const TIPS = {
     'network.scale_weight_norms':'Жёсткий клиппинг норм весов сети (0 = выключено).',
 
     // optimizer
-    'optimizer.optimizer_type':'Оптимизатор. AdamW8bit — экономный по VRAM. Prodigy/DAdapt — авто-LR (ставьте LR=1).',
+    'optimizer.optimizer_type':'Оптимизатор. AdamW8bit — экономный по VRAM. Prodigy/DAdapt — авто-LR (ставьте LR=1). came_pytorch.CAME — адаптивный, экономный (нужен пакет came-pytorch).',
     'optimizer.optimizer_args':'Доп. аргументы оптимизатора в форме "key=value".',
     'optimizer.learning_rate':'Базовый LR. Для Prodigy/DAdaptation = 1.0.',
     'optimizer.unet_lr':    'Отдельный LR для UNet (по умолчанию = learning_rate).',
