@@ -671,7 +671,8 @@ const PiecewiseEditor = ({ cfg, set }) => {
         const m = 1 - ((evt.clientY - rect.top) / rect.height * H - padTop) / plotH;
         return { at: Math.max(0, Math.min(1, at)), mult: Math.max(0.01, Math.min(1, m)) };
     };
-    const update = (arr) => set('optimizer.lr_piecewise', arr);
+    const update = (arr) => set('optimizer.lr_piecewise',
+        [...arr].sort((a, b) => a.at - b.at));
 
     const onDown = (i) => (e) => {
         e.stopPropagation();
@@ -750,7 +751,19 @@ const SectionTraining = ({ cfg, set, val }) => {
                         onInput=${v => set('optimizer.learning_rate', v)} />
                 </${Field}>
                 <${Field} label="lr_scheduler" tipKey="optimizer.lr_scheduler">
-                    <${Select} value=${cfg.optimizer.lr_scheduler} onInput=${v => set('optimizer.lr_scheduler', v)}
+                    <${Select} value=${cfg.optimizer.lr_scheduler} onInput=${v => {
+                        set('optimizer.lr_scheduler', v);
+                        // Drop stale scheduler-specific fields so they don't linger in the
+                        // saved JSON and confuse the next reader.
+                        if (v !== 'piecewise_constant') {
+                            set('optimizer.lr_piecewise', [
+                                { at: 0.0, mult: 1.0 },
+                                { at: 0.5, mult: 0.3 },
+                                { at: 0.8, mult: 0.1 },
+                            ]);
+                        }
+                        if (v !== 'warmup_stable_decay') set('optimizer.lr_decay_steps', null);
+                    }}
                         options=${['constant','constant_with_warmup','linear','cosine','cosine_with_restarts','polynomial','adafactor','warmup_stable_decay','piecewise_constant']} />
                 </${Field}>
             </div>
