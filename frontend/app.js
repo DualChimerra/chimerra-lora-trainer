@@ -7,6 +7,7 @@ import { api, openSocket } from './api.js';
 import { TIPS, tipFor } from './tooltips.js';
 import { validate, findWarn } from './validations.js';
 import { BUILTIN_PRESETS, deepMerge } from './presets.js';
+import { loraFileToPatch } from './safetensors_meta.js';
 
 const html = htm.bind(h);
 
@@ -1244,6 +1245,16 @@ const SectionPresets = ({ cfg, applyPatch, replaceCfg, presets, refresh }) => {
     };
 
     const onImportFile = async (file) => {
+        const isSafetensors = /\.safetensors$/i.test(file.name);
+        if (isSafetensors) {
+            try {
+                const { patch, warnings } = await loraFileToPatch(file);
+                replaceCfg(deepMerge(cfg, patch));
+                toast('ok', `Настройки восстановлены из чекпоинта${patch.project?.output_name ? ` (${patch.project.output_name})` : ''}`);
+                warnings.forEach(w => toast('warn', w));
+            } catch (e) { toast('err', 'Не удалось прочитать чекпоинт: ' + e.message); }
+            return;
+        }
         try {
             const text = await file.text();
             const parsed = JSON.parse(text);
@@ -1256,7 +1267,7 @@ const SectionPresets = ({ cfg, applyPatch, replaceCfg, presets, refresh }) => {
 
     return html`
         <h2>Шаблоны (пресеты)</h2>
-        <div class="subtitle">Сохраняйте и переключайте конфигурации, экспортируйте в JSON.</div>
+        <div class="subtitle">Сохраняйте и переключайте конфигурации, экспортируйте в JSON. Импорт принимает JSON-конфиг или готовый <code>.safetensors</code> чекпоинт LoRA — настройки тренировки восстановятся из метадаты.</div>
 
         <div class="card">
             <div class="card-title">Встроенные стартовые пресеты</div>
@@ -1297,9 +1308,9 @@ const SectionPresets = ({ cfg, applyPatch, replaceCfg, presets, refresh }) => {
             <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
                 <${Btn} variant="primary" onClick=${onSave}>💾 Сохранить пресет</${Btn}>
                 <${Btn} variant="ghost" onClick=${onExport}>↓ Экспорт JSON</${Btn}>
-                <${Btn} variant="ghost" onClick=${() => fileRef.current?.click()}>↑ Импорт JSON</${Btn}>
-                <input ref=${fileRef} type="file" accept="application/json" style="display:none;"
-                    onChange=${e => e.target.files[0] && onImportFile(e.target.files[0])} />
+                <${Btn} variant="ghost" onClick=${() => fileRef.current?.click()}>↑ Импорт JSON / LoRA</${Btn}>
+                <input ref=${fileRef} type="file" accept="application/json,.json,.safetensors" style="display:none;"
+                    onChange=${e => { if (e.target.files[0]) { onImportFile(e.target.files[0]); e.target.value = ''; } }} />
             </div>
         </div>
     `;
