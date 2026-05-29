@@ -1372,6 +1372,9 @@ const LrChart = ({ cfg, totalSteps, status, lrTrace }) => {
     // current position
     const running = status.state === 'running' || status.state === 'starting';
     const curX = totalSteps > 0 && status.step > 0 ? X(status.step / totalSteps) : null;
+    const curY = curX != null && status.lr != null ? Y(status.lr / peakLr) : null;
+    const lrText = status.lr?.toExponential?.(2) ?? null;
+    const labelX = curX != null ? Math.max(padX + 14, Math.min(W - padX - 14, curX)) : 0;
 
     return html`
         <svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto; display:block;">
@@ -1385,6 +1388,9 @@ const LrChart = ({ cfg, totalSteps, status, lrTrace }) => {
                 stroke-width="1.6" stroke-linejoin="round" opacity="0.9"/>`}
             ${curX != null && html`<line x1=${curX} y1=${padTop} x2=${curX} y2=${padTop + plotH}
                 stroke="#ff5d5d" stroke-width="1.5"/>`}
+            ${curY != null && html`<circle cx=${curX} cy=${curY} r="2.6" fill="#ff5d5d"/>`}
+            ${lrText && html`<text x=${labelX} y=${padTop + 9} text-anchor="middle"
+                fill="#ff8a8a" font-size="9" font-weight="bold">${lrText}</text>`}
             <text x=${padX} y=${padTop - 2} fill="rgba(255,255,255,0.5)" font-size="9">LR</text>
             <text x=${W - padX} y=${H - 5} text-anchor="end" fill="rgba(255,255,255,0.5)"
                 font-size="9">шаги · ${totalSteps}</text>
@@ -1392,7 +1398,7 @@ const LrChart = ({ cfg, totalSteps, status, lrTrace }) => {
         <div class="dim" style="font-size:11px; display:flex; gap:12px; flex-wrap:wrap; margin-top:2px;">
             <span style="color:#5fb04a;">— план (${sched})</span>
             ${actual && html`<span style="color:#e8a33d;">— факт</span>`}
-            ${curX != null && html`<span style="color:#ff5d5d;">| сейчас ${Math.round(status.step / totalSteps * 100)}%</span>`}
+            ${curX != null && html`<span style="color:#ff5d5d;">| сейчас ${Math.round(status.step / totalSteps * 100)}%${lrText ? ` · LR ${lrText}` : ''}</span>`}
         </div>
     `;
 };
