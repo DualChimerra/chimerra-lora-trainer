@@ -390,8 +390,27 @@ class TrainConfig(BaseModel):
             ds.pop("max_token_length", None)
         # `anima_lokr` is only consumed when (arch=anima, kind=lokr). Strip it
         # from every other config so saved JSON / presets stay tidy.
-        if not (self.model.arch == "anima" and self.network.kind == "lokr"):
+        is_anima_lokr = self.model.arch == "anima" and self.network.kind == "lokr"
+        if not is_anima_lokr:
             data.pop("anima_lokr", None)
+        else:
+            # Anima+LoKr trains via AnimaLoraStudio, not kohya. A pile of
+            # kohya-only knobs never reach that engine — keeping them in the
+            # saved JSON is misleading (e.g. scale_weight_norms looks like an
+            # anti-overcook clamp but does nothing here; the LR-schedule fields
+            # are dead because PPSF/Prodigy force a constant LR). Drop them so
+            # the persisted config honestly reflects what the engine receives.
+            net = data.get("network") or {}
+            for k in ("scale_weight_norms", "network_dropout", "use_tucker",
+                      "use_scalar", "rank_dropout_scale", "decompose_both",
+                      "dim_from_weights", "base_weights", "base_weights_multiplier",
+                      "network_train_text_encoder_only", "preset"):
+                net.pop(k, None)
+            opt = data.get("optimizer") or {}
+            for k in ("lr_piecewise", "lr_decay_steps", "lr_warmup_steps",
+                      "lr_scheduler_args", "lr_scheduler_num_cycles",
+                      "lr_scheduler_power", "unet_lr", "text_encoder_lr"):
+                opt.pop(k, None)
         return data
 
 
