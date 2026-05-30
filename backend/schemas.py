@@ -87,12 +87,15 @@ class DatasetSection(BaseModel):
     max_data_loader_n_workers: int = 8
     persistent_data_loader_workers: bool = True
 
-    # Caption augmentation (global)
-    caption_dropout_rate: float = 0.0
-    caption_tag_dropout_rate: float = 0.0
-    caption_dropout_every_n_epochs: int = 0
-    token_warmup_min: int = 1
-    token_warmup_step: int = 0
+    # Caption augmentation (global). Optional because the Num inputs in the UI
+    # send null when the user clears the field — semantically "off". The
+    # config_builder already short-circuits None for these via `and`-checks, so
+    # accepting None lets the form save without a 422 when fields are blanked.
+    caption_dropout_rate: Optional[float] = 0.0
+    caption_tag_dropout_rate: Optional[float] = 0.0
+    caption_dropout_every_n_epochs: Optional[int] = 0
+    token_warmup_min: Optional[int] = 1
+    token_warmup_step: Optional[int] = 0
     weighted_captions: bool = False
 
     subsets: List[DatasetSubset] = Field(default_factory=list)
