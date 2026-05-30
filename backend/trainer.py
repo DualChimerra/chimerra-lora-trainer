@@ -106,9 +106,10 @@ class Trainer:
 
         # Preflight: uvloop turns a missing cwd / script / executable into a
         # bare `FileNotFoundError: [Errno 2] No such file or directory` with no
-        # filename attached. Check the likely culprits up front so the UI gets
-        # an actionable message instead of an opaque ASGI traceback.
-        missing = self._preflight(argv, cwd, is_anima_lokr(cfg))
+        # filename attached. For Anima+LoKr we also pre-check the four model
+        # paths up front — otherwise the script burns 2-3 minutes loading the
+        # transformer and VAE before tripping on text-encoder path mistakes.
+        missing = self._preflight(argv, cwd, is_anima_lokr(cfg), cfg)
         if missing:
             self.status.state = "error"
             self.status.message = missing
@@ -137,9 +138,11 @@ class Trainer:
         self._tail_task = asyncio.create_task(self._tail())
 
     @staticmethod
-    def _preflight(argv: List[str], cwd: str, anima_lokr: bool) -> Optional[str]:
+    def _preflight(argv: List[str], cwd: str, anima_lokr: bool,
+                   cfg: Optional[TrainConfig] = None) -> Optional[str]:
         """Return a user-facing error message if the subprocess will fail to
-        spawn, else None. Checked in order: cwd → script file → executable.
+        spawn or trip on a config typo seconds into execution, else None.
+        Checked in order: cwd → script file → executable → model paths.
         """
         import shutil
         if not cwd:
@@ -167,6 +170,42 @@ class Trainer:
             if shutil.which(exe) is None:
                 hint = " (`pip install accelerate`)" if exe == "accelerate" else ""
                 return f"`{exe}` не найден в PATH{hint}."
+
+        # AnimaLoraStudio model paths: file-vs-directory mistakes here cost
+        # users 2-3 minutes because the script loads the transformer (~6 GB)
+        # and VAE before reaching the text encoder. Catch them now.
+        if anima_lokr and cfg is not None:
+            m = cfg.model
+            # Files
+            for label, p in [("model.pretrained_model_name_or_path",
+                              m.pretrained_model_name_or_path),
+                             ("model.anima_vae", m.anima_vae)]:
+                if not p:
+                    return f"`{label}` не задан."
+                if not os.path.isfile(p):
+                    return f"Файл `{p}` не найден ({label})."
+            # Directories — and Qwen3 needs HF format, not a .safetensors file.
+            for label, p, marker in [
+                ("model.anima_qwen3", m.anima_qwen3, "tokenizer_config.json"),
+                ("model.anima_t5_tokenizer_path",
+                 m.anima_t5_tokenizer_path, "tokenizer_config.json"),
+            ]:
+                if not p:
+                    return f"`{label}` не задан."
+                if os.path.isfile(p):
+                    return (f"`{label}` указывает на файл, а нужна **директория** "
+                            f"в HuggingFace-формате (`{p}`).\n"
+                            + ("Qwen3 надо скачать целиком:\n"
+                               "  `from huggingface_hub import snapshot_download`\n"
+                               "  `snapshot_download(\"Qwen/Qwen3-0.6B-Base\", local_dir=\"/path/to/qwen3-dir\")`\n"
+                               "и в поле прописать путь к этой директории."
+                               if "qwen3" in label.lower() else
+                               "T5 tokenizer — это директория с tokenizer_config.json внутри."))
+                if not os.path.isdir(p):
+                    return f"Директория `{p}` не существует ({label})."
+                if not os.path.isfile(os.path.join(p, marker)):
+                    return (f"В директории `{p}` нет `{marker}` ({label}). "
+                            "Похоже модель скачана не полностью.")
         return None
 
     async def _tail(self) -> None:
