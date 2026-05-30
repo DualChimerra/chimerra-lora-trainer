@@ -11,6 +11,7 @@ import re
 import signal
 import time
 from collections import deque
+from itertools import islice
 from pathlib import Path
 from typing import Optional, List, Callable, Awaitable, Deque
 
@@ -72,9 +73,10 @@ class Trainer:
                 pass
 
     def snapshot(self) -> dict:
-        # deque has no slicing; take the last 300 without copying the whole buffer.
+        # deque has no slicing; islice from the tail offset avoids materializing
+        # the whole 5000-entry buffer just to drop all but the last 300.
         n = len(self._log_buffer)
-        tail = list(self._log_buffer)[max(0, n - 300):]
+        tail = list(islice(self._log_buffer, max(0, n - 300), n))
         return {
             "status": self.status.model_dump(),
             "tail": tail,
@@ -273,7 +275,11 @@ class Trainer:
 
     def _parse_line(self, line: str) -> bool:
         """Return True if the line is a tqdm progress update (not a real log line)."""
-        m = PROGRESS_RX.search(line) or ANIMA_STUDIO_RX.search(line)
+        m = PROGRESS_RX.search(line)
+        is_anima = False
+        if not m:
+            m = ANIMA_STUDIO_RX.search(line)
+            is_anima = bool(m)
         if m:
             try:
                 self.status.step = int(m.group("step"))
@@ -282,9 +288,17 @@ class Trainer:
                 total = m.groupdict().get("total")
                 if total:
                     self.status.total_steps = int(total)
+                total_epochs = m.groupdict().get("total_epochs")
                 if m.groupdict().get("epoch"):
-                    self.status.epoch = int(m.group("epoch"))
-                if m.groupdict().get("total_epochs"):
+                    ep = int(m.group("epoch"))
+                    # AnimaLoraStudio's plain logger (we force no_progress=True)
+                    # prints the 0-based loop index as `epoch={n}` with no
+                    # `/total`; its rich form is `epoch n/m` and already 1-based.
+                    # Bump only the plain 0-based case so the UI matches kohya.
+                    if is_anima and not total_epochs:
+                        ep += 1
+                    self.status.epoch = ep
+                if total_epochs:
                     self.status.total_epochs = int(m.group("total_epochs"))
                 if m.group("loss"):
                     self.status.loss = float(m.group("loss"))

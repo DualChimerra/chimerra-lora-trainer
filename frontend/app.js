@@ -81,6 +81,10 @@ function cleanForExport(cfg) {
         delete c.model.vae;
         delete c.model.v_parameterization;
         delete c.model.clip_skip;
+        // Anima is a DiT (no conv layers) on a Qwen3 TE (no 75-token CLIP cap) —
+        // mirror the backend serializer so exports/presets match saved configs.
+        if (c.network) { delete c.network.conv_dim; delete c.network.conv_alpha; }
+        if (c.dataset) delete c.dataset.max_token_length;
         // SDXL-only training noise/loss fields. The Anima+LoKr engine reuses a
         // handful of these (min_snr_gamma, noise_offset, multires_noise_*) via
         // its dedicated panel, so keep them for that combo — otherwise saved
@@ -98,6 +102,19 @@ function cleanForExport(cfg) {
                 'noise_offset_random_strength', 'ip_noise_gamma_random_strength',
             ];
         tdel.forEach(k => delete c.training[k]);
+        // Anima+LoKr runs through AnimaLoraStudio, not kohya: a pile of kohya-only
+        // network/optimizer knobs never reach that engine. Drop them so the
+        // export honestly reflects what the engine receives (mirrors the backend
+        // _strip_arch_irrelevant serializer).
+        if (isLokr) {
+            ['scale_weight_norms', 'network_dropout', 'use_tucker', 'use_scalar',
+             'rank_dropout_scale', 'decompose_both', 'dim_from_weights', 'base_weights',
+             'base_weights_multiplier', 'network_train_text_encoder_only', 'preset']
+                .forEach(k => { if (c.network) delete c.network[k]; });
+            ['lr_piecewise', 'lr_decay_steps', 'lr_warmup_steps', 'lr_scheduler_args',
+             'lr_scheduler_num_cycles', 'lr_scheduler_power', 'unet_lr', 'text_encoder_lr']
+                .forEach(k => { if (c.optimizer) delete c.optimizer[k]; });
+        }
     } else {
         // Anima-only model fields
         delete c.model.anima_qwen3;

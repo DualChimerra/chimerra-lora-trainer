@@ -21,6 +21,7 @@ from .state import StateStore
 from .filesystem import FileSystem, _safe_resolve
 from .trainer import Trainer
 from .config_builder import compute_total_steps, build_command
+from .anima_lokr import is_anima_lokr
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -292,8 +293,16 @@ def make_app() -> FastAPI:
     @app.post("/api/train/start")
     async def api_train_start():
         cfg = get_cfg()
-        if not cfg.paths.sd_scripts_dir:
-            raise HTTPException(400, "sd_scripts_dir is not set")
+        # Anima+LoKr trains via AnimaLoraStudio (anima_studio_dir); every other
+        # combo runs kohya from sd_scripts_dir. Validate the one that's actually
+        # used — requiring sd_scripts_dir for the LoKr path is a false blocker,
+        # and not checking anima_studio_dir leaves the real gap unguarded.
+        if is_anima_lokr(cfg):
+            if not cfg.paths.anima_studio_dir:
+                raise HTTPException(400, "anima_studio_dir is not set (нужен для Anima + LoKr)")
+        else:
+            if not cfg.paths.sd_scripts_dir:
+                raise HTTPException(400, "sd_scripts_dir is not set")
         if not cfg.paths.output_root:
             raise HTTPException(400, "output_root is not set")
         workdir = Path(cfg.paths.output_root) / ".lora_trainer" / "runs" / time.strftime("%Y%m%d-%H%M%S")
