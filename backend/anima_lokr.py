@@ -91,21 +91,6 @@ def _map_lr_scheduler(our_sched: str, their_opt: str) -> str:
     return "none"
 
 
-def _map_timestep_sampling(our_ts: Optional[str]) -> str:
-    """Our anima timestep_sampling -> their Literal set.
-
-    Their options: logit_normal / uniform / logit_normal_low / mode /
-    mixed_uniform_low / mixed_uniform_logit. Our vocabulary (shift / sigmoid /
-    uniform / logit_normal / mode) only partially overlaps; map the ones that
-    exist and default the rest to logit_normal (SD3/Anima default).
-    """
-    s = (our_ts or "").lower()
-    if s in ("logit_normal", "uniform", "logit_normal_low", "mode",
-             "mixed_uniform_low", "mixed_uniform_logit"):
-        return s
-    return "logit_normal"
-
-
 def _map_mixed_precision(mp: str) -> str:
     s = (mp or "").lower()
     return s if s in ("bf16", "fp16", "no") else "bf16"
@@ -124,17 +109,14 @@ def _map_attention_backend(cfg: TrainConfig) -> str:
 def _map_loss(cfg: TrainConfig) -> Tuple[str, str]:
     """(loss_type, loss_weighting) in their vocabulary.
 
-    The dedicated `cfg.anima_lokr.loss_weighting` wins when set to anything
-    other than the default "none" — it carries detail_inv_t / cosmap which
-    have no kohya equivalent. Otherwise fall back to min_snr when the user
-    has a non-zero kohya min_snr_gamma.
+    In Anima+LoKr mode the user only ever sees/edits the AnimaLokrTrainingPanel,
+    so `cfg.anima_lokr.loss_weighting` is AUTHORITATIVE. The kohya
+    `training.min_snr_gamma` field is hidden in this mode and must not leak a
+    `min_snr` weighting the user didn't pick — that was the source of configs
+    showing "none" in the panel but training with min_snr.
     """
     lt = "huber" if cfg.training.loss_type in ("huber", "smooth_l1") else "mse"
-    al = cfg.anima_lokr.loss_weighting
-    if al and al != "none":
-        return lt, al
-    lw = "min_snr" if (cfg.training.min_snr_gamma or 0) > 0 else "none"
-    return lt, lw
+    return lt, (cfg.anima_lokr.loss_weighting or "none")
 
 
 # ---------------------------------------------------------------------------
@@ -257,8 +239,14 @@ def build_studio_config(cfg: TrainConfig, workdir: Path) -> Dict[str, Any]:
         "pyramid_noise_discount": float(
             tr.multires_noise_discount if tr.multires_noise_discount is not None else 0.35
         ),
-        "timestep_sampling": _map_timestep_sampling(tr.timestep_sampling),
-        "timestep_shift": float(tr.discrete_flow_shift or 3.0),
+        # Timestep sampling is owned by the AnimaLokrTrainingPanel — read it
+        # straight from cfg.anima_lokr, NOT from the hidden kohya FlowMatch
+        # fields (training.timestep_sampling / discrete_flow_shift). Those keep
+        # SDXL/kohya-vocab defaults like "uniform"/shift=1 that, when leaked
+        # into a flow-matching DiT, over-weight the high-noise regime and fry
+        # the LoRA within the first epoch.
+        "timestep_sampling": cfg.anima_lokr.timestep_sampling or "logit_normal",
+        "timestep_shift": float(cfg.anima_lokr.timestep_shift or 3.0),
         "loss_type": loss_type,
         "loss_weighting": loss_weighting,
 
@@ -315,11 +303,9 @@ def build_studio_config(cfg: TrainConfig, workdir: Path) -> Dict[str, Any]:
             "infonoise_N_min": al.infonoise_N_min,
         })
 
-    # Timestep extras (their dialect overrides the kohya one when set non-default).
-    if al.timestep_sampling and al.timestep_sampling != "logit_normal":
-        out["timestep_sampling"] = al.timestep_sampling
-    if al.timestep_shift and al.timestep_shift != 3.0:
-        out["timestep_shift"] = al.timestep_shift
+    # Timestep extras. timestep_sampling/shift are already set authoritatively
+    # from cfg.anima_lokr in the base dict above; only the mixed_*-mode and
+    # post-sample schedule knobs remain conditional.
     if al.timestep_mix_low_prob > 0:
         out["timestep_mix_low_prob"] = al.timestep_mix_low_prob
     if al.timestep_schedule_shift and al.timestep_schedule_shift != 1.0:
