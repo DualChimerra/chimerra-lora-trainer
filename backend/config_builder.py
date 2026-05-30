@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 
 from .schemas import TrainConfig, NetworkSection, SamplesSection
+from .anima_lokr import is_anima_lokr, build_anima_lokr_command
 
 
 # ---------------------------------------------------------------------------
@@ -27,9 +28,19 @@ def _network_module(net: NetworkSection, arch: str = "sdxl") -> Tuple[str, List[
             return ("networks.lora_anima", [])
         return ("networks.lora", [])
 
-    # Everything else lives in LyCORIS
+    # Everything else lives in LyCORIS. LyCORIS treats `preset=` as either a
+    # built-in name or a path to a .toml file; an unknown bare name (e.g. a
+    # leftover "anima_full" from imported metadata) makes it try to open the
+    # string as a file and crash. Fall back to "full" so training just runs.
+    _LYCORIS_BUILTINS = {
+        "full", "full-lin", "attn-mlp", "attn-only",
+        "unet-transformer-only", "unet-convblock-only", "ia3",
+    }
+    preset = net.preset or "full"
+    if preset not in _LYCORIS_BUILTINS and not os.path.isfile(preset):
+        preset = "full"
     args = [
-        f"preset={net.preset}",
+        f"preset={preset}",
         f"algo={net.kind}",  # locon, loha, lokr, dylora, ia3
     ]
     if net.conv_dim is not None:
@@ -162,7 +173,22 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
     Two scripts are wired:
         - sdxl_train_network.py  (NoobAI / Illustrious / any SDXL fork)
         - anima_train_network.py (DiT + Qwen3 TE + Qwen-Image VAE)
+
+    Special case: Anima + LyCORIS LoKr is handled by a fully separate engine
+    (AnimaLoraStudio), not kohya. We delegate immediately and the rest of this
+    function — the entire kohya path — is left untouched for every other combo.
     """
+    from .anima_lokr import is_anima_lokr, build_anima_lokr_command
+    if is_anima_lokr(cfg):
+        return build_anima_lokr_command(cfg, workdir)
+
+    # Anima + LyCORIS LoKr: hand off to AnimaLoraStudio's engine. Kohya
+    # sd-scripts has no battle-tested LoKr path for the Anima DiT; their repo
+    # drives lycoris.LycorisNetwork directly with an Anima-aware target preset.
+    # Every other (arch, kind) pair continues through this function untouched.
+    if is_anima_lokr(cfg):
+        return build_anima_lokr_command(cfg, workdir)
+
     workdir.mkdir(parents=True, exist_ok=True)
     dataset_toml = write_dataset_toml(cfg, workdir / "dataset.toml")
     sample_file = write_sample_prompts(cfg.samples, workdir / "samples.txt")

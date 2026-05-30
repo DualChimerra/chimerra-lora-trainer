@@ -90,6 +90,9 @@ function detectNetwork(meta, net) {
     put(net, 'use_tucker', asBool(args.use_tucker));
     put(net, 'use_scalar', asBool(args.use_scalar));
     put(net, 'decompose_both', asBool(args.decompose_both));
+    // AnimaLoraStudio writes these for LoKr (`weight_decompose` = DoRA, `rs_lora`).
+    put(net, 'weight_decompose', asBool(args.weight_decompose));
+    put(net, 'rs_lora', asBool(args.rs_lora));
     put(net, 'rank_dropout', asNum(args.rank_dropout));
     put(net, 'module_dropout', asNum(args.module_dropout));
     put(net, 'rank_dropout_scale', asBool(args.rank_dropout_scale));

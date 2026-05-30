@@ -556,6 +556,12 @@ const SectionNetwork = ({ cfg, set, val }) => {
     const n = cfg.network;
     const isAlphaWarn = !!val.warnMap['network.network_alpha'];
     const isLycoris = n.kind !== 'lora';
+    // Anima + LoKr runs through AnimaLoraStudio's engine, NOT kohya. A pile
+    // of kohya-only knobs (network_dropout, scale_weight_norms, use_tucker,
+    // train_unet/te_only switches, base_weights, dim_from_weights) have no
+    // counterpart there — gate them so the form only shows what actually
+    // reaches the trainer.
+    const isAnimaLokr = cfg.model?.arch === 'anima' && n.kind === 'lokr';
     return html`
         <h2>Сеть</h2>
         <div class="subtitle">LoRA или LyCORIS (LoCon · LoHA · LoKr · DyLoRA · IA³).</div>
@@ -602,6 +608,18 @@ const SectionNetwork = ({ cfg, set, val }) => {
                         <${Switch} value=${n.decompose_both} onInput=${v => set('network.decompose_both', v)} />
                     </${Field}>
                 </div>
+                <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">
+                    <${Check} value=${n.weight_decompose} onInput=${v => set('network.weight_decompose', v)} label="DoRA (weight_decompose)" />
+                    <${Check} value=${n.rs_lora} onInput=${v => set('network.rs_lora', v)} label="rs-LoRA" />
+                </div>
+                ${cfg.model.arch === 'anima' && html`
+                    <div class="dim" style="margin-top:6px; padding:6px 10px; border-left:3px solid #5fb04a; background:rgba(95,176,74,0.08); font-size:12.5px;">
+                        Anima + LoKr → тренировка идёт через AnimaLoraStudio (не kohya).
+                        Активный пресет таргетинга: <b>anima_full</b>
+                        — q/k/v/output_proj + mlp.layer1/2, без llm_adapter.
+                        Поля <code>preset</code> / <code>conv_dim</code> / <code>conv_alpha</code> игнорируются.
+                    </div>
+                `}
             `}
         </div>
 
@@ -614,24 +632,30 @@ const SectionNetwork = ({ cfg, set, val }) => {
                 <${Field} label="module_dropout" tipKey="network.module_dropout">
                     <${Num} value=${n.module_dropout} step=${0.05} min=${0} max=${1} onInput=${v => set('network.module_dropout', v)} />
                 </${Field}>
-                <${Field} label="network_dropout" tipKey="network.network_dropout">
-                    <${Num} value=${n.network_dropout} step=${0.05} min=${0} max=${1} onInput=${v => set('network.network_dropout', v)} />
-                </${Field}>
-                <${Field} label="scale_weight_norms" tipKey="network.scale_weight_norms">
-                    <${Num} value=${n.scale_weight_norms} step=${0.1} onInput=${v => set('network.scale_weight_norms', v)} />
-                </${Field}>
+                ${!isAnimaLokr && html`
+                    <${Field} label="network_dropout" tipKey="network.network_dropout">
+                        <${Num} value=${n.network_dropout} step=${0.05} min=${0} max=${1} onInput=${v => set('network.network_dropout', v)} />
+                    </${Field}>
+                    <${Field} label="scale_weight_norms" tipKey="network.scale_weight_norms">
+                        <${Num} value=${n.scale_weight_norms} step=${0.1} onInput=${v => set('network.scale_weight_norms', v)} />
+                    </${Field}>
+                `}
             </div>
-            <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">
-                <${Check} value=${n.use_tucker} onInput=${v => set('network.use_tucker', v)} label="use_tucker" />
-                <${Check} value=${n.use_scalar} onInput=${v => set('network.use_scalar', v)} label="use_scalar" />
-                <${Check} value=${n.rank_dropout_scale} onInput=${v => set('network.rank_dropout_scale', v)} label="rank_dropout_scale" />
-                <${Check} value=${n.network_train_unet_only} onInput=${v => set('network.network_train_unet_only', v)} label="train_unet_only" />
-                <${Check} value=${n.network_train_text_encoder_only} onInput=${v => set('network.network_train_text_encoder_only', v)} label="train_text_encoder_only" />
-            </div>
-            ${val.errMap['network.network_train_text_encoder_only'] && html`
-                <div class="field-err" style="margin-top:6px;">${val.errMap['network.network_train_text_encoder_only']}</div>
+            ${!isAnimaLokr && html`
+                <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">
+                    <${Check} value=${n.use_tucker} onInput=${v => set('network.use_tucker', v)} label="use_tucker" />
+                    <${Check} value=${n.use_scalar} onInput=${v => set('network.use_scalar', v)} label="use_scalar" />
+                    <${Check} value=${n.rank_dropout_scale} onInput=${v => set('network.rank_dropout_scale', v)} label="rank_dropout_scale" />
+                    <${Check} value=${n.network_train_unet_only} onInput=${v => set('network.network_train_unet_only', v)} label="train_unet_only" />
+                    <${Check} value=${n.network_train_text_encoder_only} onInput=${v => set('network.network_train_text_encoder_only', v)} label="train_text_encoder_only" />
+                </div>
+                ${val.errMap['network.network_train_text_encoder_only'] && html`
+                    <div class="field-err" style="margin-top:6px;">${val.errMap['network.network_train_text_encoder_only']}</div>
+                `}
             `}
         </div>
+
+        ${isAnimaLokr && html`<${AnimaLokrNetworkPanel} cfg=${cfg} set=${set} />`}
 
         <div class="card">
             <div class="card-title">Продолжить с весов (опционально)</div>
@@ -639,10 +663,199 @@ const SectionNetwork = ({ cfg, set, val }) => {
                 <${Text} value=${n.network_weights || ''} onInput=${v => set('network.network_weights', v || null)}
                     placeholder="(пустое — обучаем с нуля; или путь к .safetensors LoRA)" />
             </${Field}>
-            <${Field} label="dim_from_weights" tipKey="network.dim_from_weights">
-                <${Check} value=${!!n.dim_from_weights} onInput=${v => set('network.dim_from_weights', v)}
-                    label="взять network_dim/alpha из весов" />
+            ${!isAnimaLokr && html`
+                <${Field} label="dim_from_weights" tipKey="network.dim_from_weights">
+                    <${Check} value=${!!n.dim_from_weights} onInput=${v => set('network.dim_from_weights', v)}
+                        label="взять network_dim/alpha из весов" />
+                </${Field}>
+            `}
+        </div>
+    `;
+};
+
+// =============================================================================
+// Section: ANIMA + LOKR EXTRAS (LyCORIS per-layer rank, regularization dataset)
+// =============================================================================
+// Visible only when (arch=anima, kind=lokr). Maps 1:1 to AnimaLoraStudio's
+// TrainingConfig fields under our cfg.anima_lokr section.
+const AnimaLokrNetworkPanel = ({ cfg, set }) => {
+    const al = cfg.anima_lokr || {};
+    const regDimsText = al.lora_reg_dims
+        ? Object.entries(al.lora_reg_dims).map(([k, v]) => `${k} = ${v}`).join('\n')
+        : '';
+    const onRegDims = (text) => {
+        const out = {};
+        for (const line of (text || '').split(/\r?\n/)) {
+            const m = line.match(/^\s*(.+?)\s*=\s*(\d+)\s*$/);
+            if (m) out[m[1]] = parseInt(m[2], 10);
+        }
+        set('anima_lokr.lora_reg_dims', Object.keys(out).length ? out : null);
+    };
+    return html`
+        <div class="card">
+            <div class="card-title">Anima · LoKr · дополнительно</div>
+            <${Field} label="lora_reg_dims" tipKey="anima_lokr.lora_reg_dims" columns="stack">
+                <textarea class="ta" rows="3" style="font-family:monospace;"
+                    placeholder="regex = rank, по одному правилу на строку. Пример:&#10;lora_unet_.*double.* = 16"
+                    value=${regDimsText}
+                    onInput=${e => onRegDims(e.target.value)} />
             </${Field}>
+            <div class="grid-3">
+                <${Field} label="kv_trim" tipKey="anima_lokr.kv_trim">
+                    <${Switch} value=${!!al.kv_trim} onInput=${v => set('anima_lokr.kv_trim', v)} />
+                </${Field}>
+                <${Field} label="reg_data_dir" tipKey="anima_lokr.reg_data_dir">
+                    <${Text} value=${al.reg_data_dir || ''}
+                        onInput=${v => set('anima_lokr.reg_data_dir', v || null)}
+                        placeholder="(опц.) папка с regularization-картинками" />
+                </${Field}>
+                <${Field} label="reg_weight" tipKey="anima_lokr.reg_weight">
+                    <${Num} value=${al.reg_weight ?? 1.0} step=${0.05} min=${0} max=${1}
+                        onInput=${v => set('anima_lokr.reg_weight', v)} />
+                </${Field}>
+            </div>
+        </div>
+    `;
+};
+
+// PPSF (ProdigyPlusScheduleFree) — exposed only when optimizer_type matches and
+// (arch=anima, kind=lokr). All fields land in cfg.anima_lokr.ppsf_*.
+const PPSFPanel = ({ al, set }) => html`
+    <div class="grid-3" style="margin-top:6px;">
+        <${Field} label="ppsf_d_coef" tipKey="anima_lokr.ppsf_d_coef">
+            <${Num} value=${al.ppsf_d_coef ?? 1.0} step=${0.1} min=${0.1} max=${10}
+                onInput=${v => set('anima_lokr.ppsf_d_coef', v)} />
+        </${Field}>
+        <${Field} label="ppsf_prodigy_steps" tipKey="anima_lokr.ppsf_prodigy_steps">
+            <${Num} value=${al.ppsf_prodigy_steps ?? 0} min=${0}
+                onInput=${v => set('anima_lokr.ppsf_prodigy_steps', v)} />
+        </${Field}>
+        <${Field} label="ppsf_beta1" tipKey="anima_lokr.ppsf_beta1">
+            <${Num} value=${al.ppsf_beta1 ?? 0.9} step=${0.01} min=${0} max=${1}
+                onInput=${v => set('anima_lokr.ppsf_beta1', v)} />
+        </${Field}>
+        <${Field} label="ppsf_beta2" tipKey="anima_lokr.ppsf_beta2">
+            <${Num} value=${al.ppsf_beta2 ?? 0.99} step=${0.001} min=${0} max=${1}
+                onInput=${v => set('anima_lokr.ppsf_beta2', v)} />
+        </${Field}>
+    </div>
+    <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">
+        <${Check} value=${!!al.ppsf_split_groups} onInput=${v => set('anima_lokr.ppsf_split_groups', v)} label="split_groups" />
+        <${Check} value=${!!al.ppsf_split_groups_mean} onInput=${v => set('anima_lokr.ppsf_split_groups_mean', v)} label="split_groups_mean" />
+        <${Check} value=${!!al.ppsf_use_speed} onInput=${v => set('anima_lokr.ppsf_use_speed', v)} label="use_speed" />
+        <${Check} value=${!!al.ppsf_fused_back_pass} onInput=${v => set('anima_lokr.ppsf_fused_back_pass', v)} label="fused_back_pass" />
+        <${Check} value=${!!al.ppsf_use_stableadamw} onInput=${v => set('anima_lokr.ppsf_use_stableadamw', v)} label="use_stableadamw" />
+    </div>
+`;
+
+// AnimaLoraStudio loss weighting + InfoNoise + timestep extras. Replaces the
+// "FlowMatch (Anima)" card for the Anima+LoKr combo since their engine has its
+// own dialect that conflicts with kohya's.
+const AnimaLokrTrainingPanel = ({ al, set, cfg }) => {
+    const lw = al.loss_weighting || 'none';
+    const ts = al.timestep_sampling || 'logit_normal';
+    return html`
+        <div class="card">
+            <div class="card-title">Anima · LoKr · Loss + Timestep</div>
+            <div class="grid-3">
+                <${Field} label="loss_weighting" tipKey="anima_lokr.loss_weighting">
+                    <${Select} value=${lw} onInput=${v => set('anima_lokr.loss_weighting', v)}
+                        options=${['none','min_snr','detail_inv_t','cosmap']} />
+                </${Field}>
+                ${lw === 'min_snr' && html`
+                    <${Field} label="min_snr_gamma" tipKey="training.min_snr_gamma">
+                        <${Num} value=${cfg.training.min_snr_gamma ?? 5.0} step=${0.5} min=${0.1} max=${20}
+                            onInput=${v => set('training.min_snr_gamma', v)} />
+                    </${Field}>
+                `}
+                ${lw === 'detail_inv_t' && html`
+                    <${Field} label="detail_inv_t_min" tipKey="anima_lokr.detail_inv_t_min">
+                        <${Num} value=${al.detail_inv_t_min ?? 1.0} step=${0.1} min=${1.0}
+                            onInput=${v => set('anima_lokr.detail_inv_t_min', v)} />
+                    </${Field}>
+                    <${Field} label="detail_inv_t_max" tipKey="anima_lokr.detail_inv_t_max">
+                        <${Num} value=${al.detail_inv_t_max ?? 5.0} step=${0.1} min=${0.1}
+                            onInput=${v => set('anima_lokr.detail_inv_t_max', v)} />
+                    </${Field}>
+                `}
+                ${lw !== 'none' && html`
+                    <${Field} label="weight_cap_ratio" tipKey="anima_lokr.weight_cap_ratio">
+                        <${Num} value=${al.weight_cap_ratio ?? 0} step=${0.5} min=${0} max=${50}
+                            onInput=${v => set('anima_lokr.weight_cap_ratio', v)} />
+                    </${Field}>
+                `}
+            </div>
+            <div class="grid-3" style="margin-top:6px;">
+                <${Field} label="timestep_sampling" tipKey="anima_lokr.timestep_sampling">
+                    <${Select} value=${ts} onInput=${v => set('anima_lokr.timestep_sampling', v)}
+                        options=${['logit_normal','uniform','logit_normal_low','mode','mixed_uniform_low','mixed_uniform_logit']} />
+                </${Field}>
+                <${Field} label="timestep_shift" tipKey="anima_lokr.timestep_shift">
+                    <${Num} value=${al.timestep_shift ?? 3.0} step=${0.1} min=${0.1} max=${10}
+                        onInput=${v => set('anima_lokr.timestep_shift', v)} />
+                </${Field}>
+                ${(ts === 'mixed_uniform_low' || ts === 'mixed_uniform_logit') && html`
+                    <${Field} label="mix_low_prob" tipKey="anima_lokr.timestep_mix_low_prob">
+                        <${Num} value=${al.timestep_mix_low_prob ?? 0} step=${0.05} min=${0} max=${1}
+                            onInput=${v => set('anima_lokr.timestep_mix_low_prob', v)} />
+                    </${Field}>
+                `}
+                <${Field} label="timestep_schedule_shift" tipKey="anima_lokr.timestep_schedule_shift">
+                    <${Num} value=${al.timestep_schedule_shift ?? 1.0} step=${0.1} min=${0.1} max=${10}
+                        onInput=${v => set('anima_lokr.timestep_schedule_shift', v)} />
+                </${Field}>
+            </div>
+            <div class="grid-3" style="margin-top:6px;">
+                <${Field} label="noise_offset" tipKey="training.noise_offset">
+                    <${Num} value=${cfg.training.noise_offset ?? 0} step=${0.001} min=${0} max=${0.2}
+                        onInput=${v => set('training.noise_offset', v)} />
+                </${Field}>
+                <${Field} label="pyramid_noise_iters" tipKey="training.multires_noise_iterations">
+                    <${Num} value=${cfg.training.multires_noise_iterations ?? 0} min=${0} max=${6}
+                        onInput=${v => set('training.multires_noise_iterations', v)} />
+                </${Field}>
+                <${Field} label="pyramid_noise_discount" tipKey="training.multires_noise_discount">
+                    <${Num} value=${cfg.training.multires_noise_discount ?? 0.35} step=${0.05} min=${0.1} max=${0.9}
+                        onInput=${v => set('training.multires_noise_discount', v)} />
+                </${Field}>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                Anima · InfoNoise (адаптивный timestep)
+                <span style="margin-left:auto;">
+                    <${Switch} value=${!!al.infonoise_enabled} onInput=${v => set('anima_lokr.infonoise_enabled', v)} />
+                </span>
+            </div>
+            ${al.infonoise_enabled && html`
+                <div class="grid-3">
+                    <${Field} label="K (бины)" tipKey="anima_lokr.infonoise_K">
+                        <${Num} value=${al.infonoise_K ?? 64} min=${16} max=${256}
+                            onInput=${v => set('anima_lokr.infonoise_K', v)} />
+                    </${Field}>
+                    <${Field} label="N_warm (warmup шагов; 0=авто)" tipKey="anima_lokr.infonoise_N_warm">
+                        <${Num} value=${al.infonoise_N_warm ?? 0} min=${0}
+                            onInput=${v => set('anima_lokr.infonoise_N_warm', v)} />
+                    </${Field}>
+                    <${Field} label="M (период обновления)" tipKey="anima_lokr.infonoise_M">
+                        <${Num} value=${al.infonoise_M ?? 100} min=${10}
+                            onInput=${v => set('anima_lokr.infonoise_M', v)} />
+                    </${Field}>
+                    <${Field} label="B (FIFO ёмкость bin)" tipKey="anima_lokr.infonoise_B">
+                        <${Num} value=${al.infonoise_B ?? 256} min=${32}
+                            onInput=${v => set('anima_lokr.infonoise_B', v)} />
+                    </${Field}>
+                    <${Field} label="β (EMA новый вес)" tipKey="anima_lokr.infonoise_beta">
+                        <${Num} value=${al.infonoise_beta ?? 0.9} step=${0.05} min=${0.1} max=${0.999}
+                            onInput=${v => set('anima_lokr.infonoise_beta', v)} />
+                    </${Field}>
+                    <${Field} label="N_min (мин. сэмплов в bin)" tipKey="anima_lokr.infonoise_N_min">
+                        <${Num} value=${al.infonoise_N_min ?? 50} min=${1}
+                            onInput=${v => set('anima_lokr.infonoise_N_min', v)} />
+                    </${Field}>
+                </div>
+            `}
         </div>
     `;
 };
@@ -731,9 +944,25 @@ const PiecewiseEditor = ({ cfg, set }) => {
 };
 
 const SectionTraining = ({ cfg, set, val }) => {
-    const opts = ['AdamW','AdamW8bit','Lion','Lion8bit','Prodigy','DAdaptation','DAdaptAdam','DAdaptLion',
-                  'SGDNesterov','SGDNesterov8bit','AdaFactor','PagedAdamW8bit','PagedLion8bit','pytorch_optimizer.CAME'];
     const isAnima = cfg.model.arch === 'anima';
+    // AnimaLoraStudio's engine only ships adamw / prodigy / ProdigyPlusScheduleFree.
+    // Show ONLY those three when training Anima+LoKr; otherwise the full kohya list.
+    const isAnimaLokr = isAnima && cfg.network.kind === 'lokr';
+    const opts = isAnimaLokr
+        ? ['AdamW', 'Prodigy', 'ProdigyPlusScheduleFree']
+        : ['AdamW','AdamW8bit','Lion','Lion8bit','Prodigy','DAdaptation','DAdaptAdam','DAdaptLion',
+           'SGDNesterov','SGDNesterov8bit','AdaFactor','PagedAdamW8bit','PagedLion8bit','pytorch_optimizer.CAME'];
+    // AnimaLoraStudio's schema literal is {none, cosine, cosine_with_restart}.
+    // Map "constant" → "none" in their YAML; the UI surfaces "constant" because
+    // it's our wording. Hide everything outside their support set when in combo.
+    const lrOpts = isAnimaLokr
+        ? ['constant', 'cosine', 'cosine_with_restarts']
+        : ['constant','constant_with_warmup','linear','cosine','cosine_with_restarts',
+           'polynomial','adafactor','warmup_stable_decay','piecewise_constant'];
+    const opt = cfg.optimizer.optimizer_type;
+    const isPPSF = isAnimaLokr && opt === 'ProdigyPlusScheduleFree';
+    const isProdigy = isAnimaLokr && opt === 'Prodigy';
+    const al = cfg.anima_lokr || {};
     return html`
         <h2>Оптимизатор и обучение</h2>
         <div class="subtitle">LR, оптимизатор, расписание, длительность.</div>
@@ -764,54 +993,82 @@ const SectionTraining = ({ cfg, set, val }) => {
                         }
                         if (v !== 'warmup_stable_decay') set('optimizer.lr_decay_steps', null);
                     }}
-                        options=${['constant','constant_with_warmup','linear','cosine','cosine_with_restarts','polynomial','adafactor','warmup_stable_decay','piecewise_constant']} />
+                        options=${lrOpts} />
                 </${Field}>
             </div>
             <div class="grid-3">
-                <${Field} label="unet_lr" tipKey="optimizer.unet_lr">
-                    <${Num} value=${cfg.optimizer.unet_lr ?? ''} step=${1e-5} onInput=${v => set('optimizer.unet_lr', v)} />
-                </${Field}>
-                <${Field} label="text_encoder_lr" tipKey="optimizer.text_encoder_lr">
-                    <${Num} value=${cfg.optimizer.text_encoder_lr ?? ''} step=${1e-5} onInput=${v => set('optimizer.text_encoder_lr', v)} />
-                </${Field}>
-                <${Field} label="lr_warmup_steps" tipKey="optimizer.lr_warmup_steps">
-                    <${Num} value=${cfg.optimizer.lr_warmup_steps} onInput=${v => set('optimizer.lr_warmup_steps', v)} />
-                </${Field}>
-                ${cfg.optimizer.lr_scheduler === 'warmup_stable_decay' && html`
-                    <${Field} label="lr_decay_steps" tipKey="optimizer.lr_decay_steps">
-                        <${Num} value=${cfg.optimizer.lr_decay_steps ?? ''} step=${0.05} min=${0}
-                            onInput=${v => set('optimizer.lr_decay_steps', v)} />
-                    </${Field}>`}
-                <${Field} label="lr_scheduler_num_cycles" tipKey="optimizer.lr_scheduler_num_cycles"
-                    warn=${val.warnMap['optimizer.lr_scheduler_num_cycles']}>
-                    <${Num} value=${cfg.optimizer.lr_scheduler_num_cycles} onInput=${v => set('optimizer.lr_scheduler_num_cycles', v)} />
-                </${Field}>
-                <${Field} label="lr_scheduler_power" tipKey="optimizer.lr_scheduler_power">
-                    <${Num} value=${cfg.optimizer.lr_scheduler_power} step=${0.1} onInput=${v => set('optimizer.lr_scheduler_power', v)} />
-                </${Field}>
+                ${!isAnimaLokr && html`
+                    <${Field} label="unet_lr" tipKey="optimizer.unet_lr">
+                        <${Num} value=${cfg.optimizer.unet_lr ?? ''} step=${1e-5} onInput=${v => set('optimizer.unet_lr', v)} />
+                    </${Field}>
+                    <${Field} label="text_encoder_lr" tipKey="optimizer.text_encoder_lr">
+                        <${Num} value=${cfg.optimizer.text_encoder_lr ?? ''} step=${1e-5} onInput=${v => set('optimizer.text_encoder_lr', v)} />
+                    </${Field}>
+                    <${Field} label="lr_warmup_steps" tipKey="optimizer.lr_warmup_steps">
+                        <${Num} value=${cfg.optimizer.lr_warmup_steps} onInput=${v => set('optimizer.lr_warmup_steps', v)} />
+                    </${Field}>
+                    ${cfg.optimizer.lr_scheduler === 'warmup_stable_decay' && html`
+                        <${Field} label="lr_decay_steps" tipKey="optimizer.lr_decay_steps">
+                            <${Num} value=${cfg.optimizer.lr_decay_steps ?? ''} step=${0.05} min=${0}
+                                onInput=${v => set('optimizer.lr_decay_steps', v)} />
+                        </${Field}>`}
+                    <${Field} label="lr_scheduler_num_cycles" tipKey="optimizer.lr_scheduler_num_cycles"
+                        warn=${val.warnMap['optimizer.lr_scheduler_num_cycles']}>
+                        <${Num} value=${cfg.optimizer.lr_scheduler_num_cycles} onInput=${v => set('optimizer.lr_scheduler_num_cycles', v)} />
+                    </${Field}>
+                    <${Field} label="lr_scheduler_power" tipKey="optimizer.lr_scheduler_power">
+                        <${Num} value=${cfg.optimizer.lr_scheduler_power} step=${0.1} onInput=${v => set('optimizer.lr_scheduler_power', v)} />
+                    </${Field}>
+                `}
                 <${Field} label="max_grad_norm" tipKey="optimizer.max_grad_norm">
                     <${Num} value=${cfg.optimizer.max_grad_norm ?? 1.0} step=${0.1} min=${0}
                         onInput=${v => set('optimizer.max_grad_norm', v)} />
                 </${Field}>
             </div>
-            ${cfg.optimizer.lr_scheduler === 'piecewise_constant' && html`<${PiecewiseEditor} cfg=${cfg} set=${set} />`}
-            <${Field} label="optimizer_args" tipKey="optimizer.optimizer_args" columns="stack">
-                <textarea placeholder=${"weight_decay=0.1\nbetas=0.9,0.999"}
-                    value=${(cfg.optimizer.optimizer_args || []).join('\n')}
-                    onInput=${e => set('optimizer.optimizer_args',
-                        // split on real newlines or HTML-encoded newlines users may have pasted
-                        e.target.value
-                            .replace(/&#10;|&#xA;/gi, '\n')
-                            .split(/\n+/)
-                            .map(s => s.trim())
-                            .filter(Boolean))}></textarea>
-            </${Field}>
-            <${Field} label="lr_scheduler_args" tipKey="optimizer.lr_scheduler_args" columns="stack">
-                <textarea placeholder=${"num_cycles=1\npower=1.0"}
-                    value=${(cfg.optimizer.lr_scheduler_args || []).join('\n')}
-                    onInput=${e => set('optimizer.lr_scheduler_args',
-                        e.target.value.replace(/&#10;|&#xA;/gi, '\n').split(/\n+/).map(s => s.trim()).filter(Boolean))}></textarea>
-            </${Field}>
+            ${!isAnimaLokr && cfg.optimizer.lr_scheduler === 'piecewise_constant' && html`<${PiecewiseEditor} cfg=${cfg} set=${set} />`}
+            ${isAnimaLokr ? html`
+                <${Field} label="weight_decay" tipKey="optimizer.optimizer_args">
+                    <${Num} value=${(function(){
+                        // Pull weight_decay out of kohya-style optimizer_args so users can
+                        // tweak it as a plain number without editing a textarea.
+                        const a = (cfg.optimizer.optimizer_args || []).find(s => /^\s*weight_decay\s*=/.test(s));
+                        return a ? parseFloat(a.split('=')[1]) : 0;
+                    })()} step=${0.001} min=${0}
+                        onInput=${v => {
+                            const rest = (cfg.optimizer.optimizer_args || []).filter(s => !/^\s*weight_decay\s*=/.test(s));
+                            set('optimizer.optimizer_args', v > 0 ? [...rest, `weight_decay=${v}`] : rest);
+                        }} />
+                </${Field}>
+                ${isProdigy && html`
+                    <div class="grid-3" style="margin-top:6px;">
+                        <${Field} label="prodigy_d_coef" tipKey="anima_lokr.prodigy_d_coef">
+                            <${Num} value=${al.prodigy_d_coef ?? 1.0} step=${0.1} min=${0.1} max=${10}
+                                onInput=${v => set('anima_lokr.prodigy_d_coef', v)} />
+                        </${Field}>
+                        <${Field} label="safeguard_warmup" tipKey="anima_lokr.prodigy_safeguard_warmup">
+                            <${Switch} value=${!!al.prodigy_safeguard_warmup} onInput=${v => set('anima_lokr.prodigy_safeguard_warmup', v)} />
+                        </${Field}>
+                    </div>
+                `}
+                ${isPPSF && html`<${PPSFPanel} al=${al} set=${set} />`}
+            ` : html`
+                <${Field} label="optimizer_args" tipKey="optimizer.optimizer_args" columns="stack">
+                    <textarea placeholder=${"weight_decay=0.1\nbetas=0.9,0.999"}
+                        value=${(cfg.optimizer.optimizer_args || []).join('\n')}
+                        onInput=${e => set('optimizer.optimizer_args',
+                            e.target.value
+                                .replace(/&#10;|&#xA;/gi, '\n')
+                                .split(/\n+/)
+                                .map(s => s.trim())
+                                .filter(Boolean))}></textarea>
+                </${Field}>
+                <${Field} label="lr_scheduler_args" tipKey="optimizer.lr_scheduler_args" columns="stack">
+                    <textarea placeholder=${"num_cycles=1\npower=1.0"}
+                        value=${(cfg.optimizer.lr_scheduler_args || []).join('\n')}
+                        onInput=${e => set('optimizer.lr_scheduler_args',
+                            e.target.value.replace(/&#10;|&#xA;/gi, '\n').split(/\n+/).map(s => s.trim()).filter(Boolean))}></textarea>
+                </${Field}>
+            `}
         </div>
 
         <div class="card">
@@ -864,23 +1121,27 @@ const SectionTraining = ({ cfg, set, val }) => {
                 <${Check} value=${cfg.training.gradient_checkpointing} onInput=${v => set('training.gradient_checkpointing', v)} label="gradient_checkpointing" />
                 <${Check} value=${cfg.training.sdpa} onInput=${v => set('training.sdpa', v)} label="sdpa" />
                 <${Check} value=${cfg.training.xformers} onInput=${v => set('training.xformers', v)} label="xformers" />
-                <${Check} value=${cfg.training.mem_eff_attn} onInput=${v => set('training.mem_eff_attn', v)} label="mem_eff_attn" />
-                <${Check} value=${cfg.training.full_bf16} onInput=${v => set('training.full_bf16', v)} label="full_bf16" />
-                <${Check} value=${cfg.training.full_fp16} onInput=${v => set('training.full_fp16', v)} label="full_fp16" />
-                <${Check} value=${cfg.training.lowram} onInput=${v => set('training.lowram', v)} label="lowram" />
-                <${Check} value=${cfg.training.highvram} onInput=${v => set('training.highvram', v)} label="highvram" />
-                <${Check} value=${cfg.training.fused_backward_pass} onInput=${v => set('training.fused_backward_pass', v)} label="fused_backward_pass" />
+                ${!isAnimaLokr && html`
+                    <${Check} value=${cfg.training.mem_eff_attn} onInput=${v => set('training.mem_eff_attn', v)} label="mem_eff_attn" />
+                    <${Check} value=${cfg.training.full_bf16} onInput=${v => set('training.full_bf16', v)} label="full_bf16" />
+                    <${Check} value=${cfg.training.full_fp16} onInput=${v => set('training.full_fp16', v)} label="full_fp16" />
+                    <${Check} value=${cfg.training.lowram} onInput=${v => set('training.lowram', v)} label="lowram" />
+                    <${Check} value=${cfg.training.highvram} onInput=${v => set('training.highvram', v)} label="highvram" />
+                    <${Check} value=${cfg.training.fused_backward_pass} onInput=${v => set('training.fused_backward_pass', v)} label="fused_backward_pass" />
+                `}
             </div>
-            <div class="grid-3" style="margin-top:6px;">
-                <${Field} label="vae_batch_size" tipKey="training.vae_batch_size">
-                    <${Num} value=${cfg.training.vae_batch_size ?? 0} min=${0}
-                        onInput=${v => set('training.vae_batch_size', v)} />
-                </${Field}>
-                <${Field} label="prior_loss_weight" tipKey="training.prior_loss_weight">
-                    <${Num} value=${cfg.training.prior_loss_weight ?? 1.0} step=${0.1} min=${0}
-                        onInput=${v => set('training.prior_loss_weight', v)} />
-                </${Field}>
-            </div>
+            ${!isAnimaLokr && html`
+                <div class="grid-3" style="margin-top:6px;">
+                    <${Field} label="vae_batch_size" tipKey="training.vae_batch_size">
+                        <${Num} value=${cfg.training.vae_batch_size ?? 0} min=${0}
+                            onInput=${v => set('training.vae_batch_size', v)} />
+                    </${Field}>
+                    <${Field} label="prior_loss_weight" tipKey="training.prior_loss_weight">
+                        <${Num} value=${cfg.training.prior_loss_weight ?? 1.0} step=${0.1} min=${0}
+                            onInput=${v => set('training.prior_loss_weight', v)} />
+                    </${Field}>
+                </div>
+            `}
             <div class="dim" style="font-size:11.5px; margin-top:6px;">
                 💡 Скорость: отключите <b>gradient_checkpointing</b> если VRAM хватает (+20–25% throughput).
                 Включите <b>highvram</b> на A100/L4 чтобы держать модели в GPU между прогонами.
@@ -892,25 +1153,29 @@ const SectionTraining = ({ cfg, set, val }) => {
             <div class="grid-3">
                 <${Field} label="loss_type" tipKey="training.loss_type">
                     <${Select} value=${cfg.training.loss_type || 'l2'} onInput=${v => set('training.loss_type', v)}
-                        options=${['l2','l1','huber','smooth_l1']} />
+                        options=${isAnimaLokr ? ['l2','huber'] : ['l2','l1','huber','smooth_l1']} />
                 </${Field}>
                 ${(cfg.training.loss_type === 'huber' || cfg.training.loss_type === 'smooth_l1') && html`
-                    <${Field} label="huber_schedule" tipKey="training.huber_schedule">
-                        <${Select} value=${cfg.training.huber_schedule || 'snr'} onInput=${v => set('training.huber_schedule', v)}
-                            options=${['snr','exponential','constant']} />
-                    </${Field}>
+                    ${!isAnimaLokr && html`
+                        <${Field} label="huber_schedule" tipKey="training.huber_schedule">
+                            <${Select} value=${cfg.training.huber_schedule || 'snr'} onInput=${v => set('training.huber_schedule', v)}
+                                options=${['snr','exponential','constant']} />
+                        </${Field}>
+                    `}
                     <${Field} label="huber_c" tipKey="training.huber_c">
                         <${Num} value=${cfg.training.huber_c ?? 0.1} step=${0.01} onInput=${v => set('training.huber_c', v)} />
                     </${Field}>
                 `}
-                <${Field} label="min_timestep" tipKey="training.min_timestep">
-                    <${Num} value=${cfg.training.min_timestep ?? 0} min=${0} max=${1000}
-                        onInput=${v => set('training.min_timestep', v)} />
-                </${Field}>
-                <${Field} label="max_timestep" tipKey="training.max_timestep">
-                    <${Num} value=${cfg.training.max_timestep ?? 1000} min=${0} max=${1000}
-                        onInput=${v => set('training.max_timestep', v)} />
-                </${Field}>
+                ${!isAnimaLokr && html`
+                    <${Field} label="min_timestep" tipKey="training.min_timestep">
+                        <${Num} value=${cfg.training.min_timestep ?? 0} min=${0} max=${1000}
+                            onInput=${v => set('training.min_timestep', v)} />
+                    </${Field}>
+                    <${Field} label="max_timestep" tipKey="training.max_timestep">
+                        <${Num} value=${cfg.training.max_timestep ?? 1000} min=${0} max=${1000}
+                            onInput=${v => set('training.max_timestep', v)} />
+                    </${Field}>
+                `}
             </div>
             <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">
                 <${Check} value=${cfg.training.save_state} onInput=${v => set('training.save_state', v)} label="save_state (на каждом save_every_n_epochs)" />
@@ -922,7 +1187,9 @@ const SectionTraining = ({ cfg, set, val }) => {
             </${Field}>
         </div>
 
-        <div class="card">
+        ${isAnimaLokr && html`<${AnimaLokrTrainingPanel} al=${al} set=${set} cfg=${cfg} />`}
+
+        <div class="card" style=${isAnimaLokr ? 'display:none' : ''}>
             <div class="card-title">${isAnima ? 'FlowMatch (Anima)' : 'Шум и Loss'}</div>
             ${isAnima
                 ? html`
@@ -1502,8 +1769,43 @@ const SECTIONS = [
     { id: 'presets',  label: 'Шаблоны',     icon: '★' },
 ];
 
+// AnimaLoraStudio's recommended defaults for the Anima + LoKr combo. Each
+// entry maps to a path in cfg. Only fields whose CURRENT value still equals
+// the OLD (kohya) default get overwritten — anything the user already touched
+// stays put. Triggered on the first transition into (anima, lokr) per session.
+const ANIMA_LOKR_DEFAULTS = [
+    ['optimizer.optimizer_type',    'AdamW',        'AdamW'],
+    ['optimizer.learning_rate',     1e-4,           1e-4],
+    ['optimizer.lr_scheduler',      'cosine',       'constant'],   // their "none"
+    ['network.network_dim',         32,             32],
+    ['network.network_alpha',       16.0,           32.0],         // their default = rank
+    ['network.factor',              -1,             8],
+    ['network.weight_decompose',    false,          false],
+    ['network.rs_lora',             false,          false],
+    ['network.network_train_unet_only', false,      true],         // their engine = unet only
+    ['training.train_batch_size',   2,              1],
+    ['training.gradient_accumulation_steps', 1,     4],
+    ['training.max_train_epochs',   10,             10],
+    ['training.save_every_n_epochs',1,              2],
+    ['training.mixed_precision',    'bf16',         'bf16'],
+    ['training.sdpa',               true,           true],
+    ['training.xformers',           false,          false],
+    ['training.noise_offset',       0.0357,         0],
+    ['training.min_snr_gamma',      5.0,            5.0],
+    ['training.timestep_sampling',  'shift',        'logit_normal'],
+    ['training.discrete_flow_shift',3.0,            3.0],
+    ['dataset.flip_aug',            false,          true],
+    ['dataset.shuffle_caption',     true,           true],
+    ['dataset.cache_latents',       true,           true],
+    ['dataset.cache_latents_to_disk', true,         true],
+    ['dataset.max_data_loader_n_workers', 8,        8],            // Colab: keep our higher default
+    ['dataset.persistent_data_loader_workers', true, true],
+];
+
 const App = () => {
     const [cfg, setCfg] = useState(null);
+    // One-shot guard so re-renders or save bounces don't re-apply defaults.
+    const animaLokrApplied = useRef(false);
     const [section, setSection] = useState('project');
     const [status, setStatus] = useState({ state: 'idle', step: 0, total_steps: 0, epoch: 0 });
     const [lrTrace, setLrTrace] = useState([]);
@@ -1597,6 +1899,37 @@ const App = () => {
             return merged;
         });
     }, []);
+
+    // Auto-apply Anima+LoKr defaults on the first transition into the combo.
+    // Fields the user has already touched (current value differs from the
+    // kohya default we shipped) are preserved. Re-arming the guard on combo
+    // change lets the user re-trigger by toggling out and back in.
+    useEffect(() => {
+        if (!cfg) return;
+        const isCombo = cfg.model?.arch === 'anima' && cfg.network?.kind === 'lokr';
+        if (!isCombo) { animaLokrApplied.current = false; return; }
+        if (animaLokrApplied.current) return;
+        animaLokrApplied.current = true;
+        setCfg(prev => {
+            let next = prev;
+            let changed = 0;
+            for (const [path, oldDef, newDef] of ANIMA_LOKR_DEFAULTS) {
+                const cur = getIn(next, path);
+                if (cur === oldDef || cur === undefined) {
+                    if (cur !== newDef) {
+                        next = setIn(next, path, newDef);
+                        changed++;
+                    }
+                }
+            }
+            if (changed > 0) {
+                setDirty(true);
+                api.putConfig(next).then(() => setDirty(false)).catch(() => {});
+                toast('ok', `Применены дефолты Anima + LoKr (${changed} поле/полей)`);
+            }
+            return next;
+        });
+    }, [cfg?.model?.arch, cfg?.network?.kind]);
 
     const applyPatch = useCallback((patch) => {
         setCfg(prev => {
