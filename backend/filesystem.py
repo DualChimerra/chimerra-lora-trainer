@@ -14,6 +14,22 @@ from dataclasses import dataclass
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 MODEL_EXTS = {".safetensors", ".ckpt", ".pt", ".pth"}
 
+# Directories we never want to descend into when walking output/model roots:
+# our own state/run scratch (which contains the Anima symlinked dataset tree),
+# VCS, and common cache dirs. Walking these is pure waste and — for the
+# symlinked dataset under .lora_trainer/runs/*/anima_dataset — would pull the
+# entire training set into the sample gallery and hammer Drive I/O each poll.
+_SKIP_DIRS = {".lora_trainer", ".git", "__pycache__", ".ipynb_checkpoints"}
+
+# kohya sample filename parser, compiled once (was re-compiled per list_samples).
+# <output>_<ts12-14>_<e000001|000012>_<idx02>_<seed>.png
+_PAT_KOHYA = re.compile(
+    r"^(?P<name>.+?)_(?P<ts>\d{12,14})_(?:e(?P<epoch>\d+)|(?P<step>\d+))"
+    r"_(?P<idx>\d+)(?:_(?P<seed>\d+))?$"
+)
+# Fallback for older/variant formats: any "_e<N>_" or "_s<N>_" anywhere.
+_PAT_LOOSE = re.compile(r"e(\d+)|epoch[_-]?(\d+)|step[_-]?(\d+)", re.IGNORECASE)
+
 
 @dataclass
 class FsEntry:
@@ -119,8 +135,14 @@ class FileSystem:
         if target is None or not target.exists():
             return []
         out: List[FsEntry] = []
-        for child in target.rglob("*"):
-            if child.is_file() and child.suffix.lower() in MODEL_EXTS:
+        # os.walk(followlinks=False) + pruning keeps us from descending into
+        # symlinked trees and scratch/cache dirs on big Drive model folders.
+        for dirpath, dirnames, filenames in os.walk(target, followlinks=False):
+            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+            for fn in filenames:
+                if os.path.splitext(fn)[1].lower() not in MODEL_EXTS:
+                    continue
+                child = Path(dirpath) / fn
                 try:
                     st = child.stat()
                 except OSError:
@@ -166,50 +188,49 @@ class FileSystem:
         if target is None or not target.exists():
             return []
         items = []
-        # kohya sd-scripts format: <output>_<ts14>_<e000001|000012>_<idx02>_<seed>.png
-        # where the middle token is "e<6 digits>" for on-epoch saves or just
-        # "<6 digits>" (step count) for on-step saves.
-        pat_kohya = re.compile(
-            r"^(?P<name>.+?)_(?P<ts>\d{12,14})_(?:e(?P<epoch>\d+)|(?P<step>\d+))"
-            r"_(?P<idx>\d+)(?:_(?P<seed>\d+))?$"
-        )
-        # Fallback for older/variant formats: any "_e<N>_" or "_s<N>_" anywhere.
-        pat_loose = re.compile(r"e(\d+)|epoch[_-]?(\d+)|step[_-]?(\d+)", re.IGNORECASE)
-        for child in sorted(target.rglob("*")):
-            if not child.is_file() or child.suffix.lower() not in IMAGE_EXTS:
-                continue
-            stem = child.stem
-            epoch = 0
-            step = 0
-            prompt_tag = ""
-            m = pat_kohya.match(stem)
-            if m:
-                if m.group("epoch"):
-                    epoch = int(m.group("epoch"))
-                if m.group("step"):
-                    step = int(m.group("step"))
-                    if epoch == 0:
-                        # so the gallery x-axis isn't all "epoch 0"
-                        epoch = step
-                prompt_tag = m.group("idx") or ""
-            else:
-                for m2 in pat_loose.finditer(stem):
-                    if m2.group(1) or m2.group(2):
-                        epoch = int(m2.group(1) or m2.group(2))
-                    elif m2.group(3):
-                        step = int(m2.group(3))
-            try:
-                st = child.stat()
-            except OSError:
-                continue
-            items.append({
-                "name": child.name,
-                "path": str(child),
-                "rel": str(child.relative_to(target)),
-                "epoch": epoch,
-                "step": step,
-                "prompt_tag": prompt_tag,
-                "size": st.st_size,
-                "mtime": st.st_mtime,
-            })
+        # os.walk(followlinks=False) + pruning is critical here: output_root
+        # contains .lora_trainer/runs/<ts>/anima_dataset/<repeats>_name, which is
+        # a SYMLINK to the training set. rglob would follow it and pull every
+        # dataset image into the gallery (and re-scan it on every poll). Prune
+        # the scratch dir and never follow links.
+        for dirpath, dirnames, filenames in os.walk(target, followlinks=False):
+            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+            for fn in sorted(filenames):
+                if os.path.splitext(fn)[1].lower() not in IMAGE_EXTS:
+                    continue
+                child = Path(dirpath) / fn
+                stem = child.stem
+                epoch = 0
+                step = 0
+                prompt_tag = ""
+                m = _PAT_KOHYA.match(stem)
+                if m:
+                    if m.group("epoch"):
+                        epoch = int(m.group("epoch"))
+                    if m.group("step"):
+                        step = int(m.group("step"))
+                        if epoch == 0:
+                            # so the gallery x-axis isn't all "epoch 0"
+                            epoch = step
+                    prompt_tag = m.group("idx") or ""
+                else:
+                    for m2 in _PAT_LOOSE.finditer(stem):
+                        if m2.group(1) or m2.group(2):
+                            epoch = int(m2.group(1) or m2.group(2))
+                        elif m2.group(3):
+                            step = int(m2.group(3))
+                try:
+                    st = child.stat()
+                except OSError:
+                    continue
+                items.append({
+                    "name": child.name,
+                    "path": str(child),
+                    "rel": str(child.relative_to(target)),
+                    "epoch": epoch,
+                    "step": step,
+                    "prompt_tag": prompt_tag,
+                    "size": st.st_size,
+                    "mtime": st.st_mtime,
+                })
         return items
