@@ -1,4 +1,4 @@
-// Built-in dafault presets — fast/quality starting points per architecture.
+// Built-in default presets — fast/quality starting points per architecture.
 // These are applied on top of the user's current config (deep-merged).
 
 export const BUILTIN_PRESETS = {
