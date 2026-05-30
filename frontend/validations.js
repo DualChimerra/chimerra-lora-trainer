@@ -5,10 +5,16 @@ export function validate(cfg) {
     const W = [];   // soft warnings (yellow)
     const E = [];   // hard errors (red)
 
-    // paths
+    // paths — Anima+LoKr trains via AnimaLoraStudio (anima_studio_dir); every
+    // other combo runs kohya from sd_scripts_dir. Require only the one in use.
+    const isAnimaLokr = cfg.model.arch === 'anima' && cfg.network.kind === 'lokr';
     if (!cfg.paths.dataset_root)    E.push({ path: 'paths.dataset_root', message: 'Не указана папка датасета' });
     if (!cfg.paths.output_root)     E.push({ path: 'paths.output_root', message: 'Не указана папка для выходных файлов' });
-    if (!cfg.paths.sd_scripts_dir)  E.push({ path: 'paths.sd_scripts_dir', message: 'Не указан путь к sd-scripts' });
+    if (isAnimaLokr) {
+        if (!cfg.paths.anima_studio_dir) E.push({ path: 'paths.anima_studio_dir', message: 'Anima + LoKr: не указан путь к AnimaLoraStudio' });
+    } else if (!cfg.paths.sd_scripts_dir) {
+        E.push({ path: 'paths.sd_scripts_dir', message: 'Не указан путь к sd-scripts' });
+    }
 
     // model
     if (!cfg.model.pretrained_model_name_or_path) {
@@ -71,6 +77,17 @@ export function validate(cfg) {
     }
     if (n.kind === 'lokr' && n.factor === 0) {
         W.push({ path: 'network.factor', message: 'Factor=0 не имеет смысла; -1 = автоматически' });
+    }
+    // AnimaLoraStudio's lokr_factor requires ≥ 2 — it has no "-1 = auto" mode
+    // like kohya LyCORIS. The backend substitutes 8, so surface that instead of
+    // letting the tooltip's "−1 = авто" silently mislead.
+    if (isAnimaLokr && n.factor < 2) {
+        W.push({ path: 'network.factor', message: `Anima+LoKr не поддерживает factor=${n.factor} (нет режима «авто»). Будет использовано factor=8 — задайте значение ≥ 2 явно` });
+    }
+    // In Anima+LoKr captions come only from .txt/.json files; class_tokens is
+    // NOT prepended to training captions the way kohya does it.
+    if (isAnimaLokr && (cfg.dataset.subsets || []).some(s => s.class_tokens && s.class_tokens.trim())) {
+        W.push({ path: 'dataset.subsets', message: 'Anima+LoKr: class_tokens НЕ дописывается в caption при тренировке (в отличие от kohya). Триггер должен быть прямо в .txt/.json caption-файлах' });
     }
     if (n.kind !== 'lora' && (n.conv_dim || 0) > n.network_dim * 2) {
         W.push({ path: 'network.conv_dim', message: 'conv_dim сильно больше network_dim — возможно избыточно' });
