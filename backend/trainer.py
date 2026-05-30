@@ -15,6 +15,7 @@ from typing import Optional, List, Callable, Awaitable
 
 from .schemas import TrainConfig, TrainStatus
 from .config_builder import build_command, compute_total_steps
+from .anima_lokr import is_anima_lokr
 
 
 # kohya/tqdm progress lines look like:
@@ -27,6 +28,16 @@ PROGRESS_RX = re.compile(
 )
 EPOCH_RX = re.compile(r"epoch\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 SAVE_RX = re.compile(r"saving checkpoint:.*?epoch[_-]?(\d+)", re.IGNORECASE)
+# AnimaLoraStudio plain progress (rich disabled): "epoch=3 step=120 loss=0.1234 lr=1.00e-04 speed=...".
+# Their other shape (rich enabled, end='\r') is identical key=value soup, so the
+# same regex covers both.
+ANIMA_STUDIO_RX = re.compile(
+    r"epoch\s*[=\s]\s*(?P<epoch>\d+)\s*(?:/\s*(?P<total_epochs>\d+))?"
+    r".*?step\s*[=\s]\s*(?P<step>\d+)\s*(?:/\s*(?P<total>\d+))?"
+    r"(?:.*?loss\s*=\s*(?P<loss>[0-9.eE+\-]+))?"
+    r"(?:.*?lr\s*=\s*(?P<lr>[0-9.eE+\-]+))?",
+    re.IGNORECASE,
+)
 
 
 class Trainer:
@@ -92,7 +103,8 @@ class Trainer:
         try:
             self.proc = await asyncio.create_subprocess_exec(
                 *argv,
-                cwd=cfg.paths.sd_scripts_dir,
+                cwd=(cfg.paths.anima_studio_dir if is_anima_lokr(cfg)
+                     else cfg.paths.sd_scripts_dir),
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
@@ -174,18 +186,24 @@ class Trainer:
 
     def _parse_line(self, line: str) -> bool:
         """Return True if the line is a tqdm progress update (not a real log line)."""
-        m = PROGRESS_RX.search(line)
+        m = PROGRESS_RX.search(line) or ANIMA_STUDIO_RX.search(line)
         if m:
             try:
                 self.status.step = int(m.group("step"))
-                self.status.total_steps = int(m.group("total"))
+                # ANIMA_STUDIO_RX's `total` is optional (their plain logger may
+                # omit it). Keep the prior total in that case.
+                total = m.groupdict().get("total")
+                if total:
+                    self.status.total_steps = int(total)
+                if m.groupdict().get("epoch"):
+                    self.status.epoch = int(m.group("epoch"))
                 if m.group("loss"):
                     self.status.loss = float(m.group("loss"))
                 if m.group("lr"):
                     self.status.lr = float(m.group("lr"))
                 started = self.status.started_at or time.time()
                 elapsed = max(1.0, time.time() - started)
-                if self.status.step > 0:
+                if self.status.step > 0 and self.status.total_steps > 0:
                     per_step = elapsed / self.status.step
                     remaining = max(0, self.status.total_steps - self.status.step)
                     self.status.eta_seconds = int(per_step * remaining)

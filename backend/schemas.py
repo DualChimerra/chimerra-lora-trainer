@@ -19,6 +19,9 @@ class Paths(BaseModel):
     output_root: str = ""
     samples_root: str = ""
     sd_scripts_dir: str = "/content/sd-scripts"
+    # AnimaLoraStudio checkout. Used ONLY for the isolated Anima + LyCORIS LoKr
+    # path (its own training engine, not kohya). Ignored by every other combo.
+    anima_studio_dir: str = "/content/AnimaLoraStudio"
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +114,13 @@ class NetworkSection(BaseModel):
     conv_alpha: Optional[float] = 8.0
     preset: str = "full"  # full, attn-mlp, attn-only, full-lin
     factor: int = -1  # LoKr only
-    decompose_both: bool = False  # LoKr
+    decompose_both: bool = False  # LoKr: also decompose w1 (second matrix)
+    # DoRA — direction/magnitude decomposition of the LoRA update. Stabilises
+    # training and often beats vanilla LoRA at the same rank.
+    weight_decompose: bool = False
+    # rs-LoRA — scale = alpha/sqrt(r) instead of alpha/r; recommended when
+    # rank > 32 because the standard scaling underweights the update.
+    rs_lora: bool = False
     use_tucker: bool = False
     use_scalar: bool = False
     rank_dropout: float = 0.0
@@ -141,6 +150,9 @@ OptimizerType = Literal[
     "SGDNesterov", "SGDNesterov8bit",
     "AdaFactor", "PagedAdamW8bit", "PagedLion8bit",
     "pytorch_optimizer.CAME",
+    # AnimaLoraStudio-only (Anima + LoKr path). Selecting this with kohya will
+    # error out — the UI gates it to (arch=anima, kind=lokr).
+    "ProdigyPlusScheduleFree",
 ]
 LrScheduler = Literal[
     "constant", "constant_with_warmup", "linear",
@@ -238,6 +250,71 @@ class TrainingSection(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Anima + LyCORIS LoKr only — fields specific to AnimaLoraStudio's engine.
+# Inert when training runs through kohya (every non-Anima-LoKr combo).
+# ---------------------------------------------------------------------------
+LossWeighting = Literal["none", "min_snr", "detail_inv_t", "cosmap"]
+AnimaTimestepSampling = Literal[
+    "logit_normal", "uniform", "logit_normal_low",
+    "mode", "mixed_uniform_low", "mixed_uniform_logit",
+]
+
+
+class AnimaLokrSection(BaseModel):
+    # ---- ProdigyPlusScheduleFree (PPSF) optimizer extras --------------------
+    # Active only when optimizer.optimizer_type == "ProdigyPlusScheduleFree".
+    ppsf_d_coef: float = 1.0
+    ppsf_prodigy_steps: int = 0
+    ppsf_beta1: float = 0.9
+    ppsf_beta2: float = 0.99
+    ppsf_split_groups: bool = True
+    ppsf_split_groups_mean: bool = False
+    ppsf_use_speed: bool = False
+    ppsf_fused_back_pass: bool = False
+    ppsf_use_stableadamw: bool = True
+
+    # ---- Prodigy extras (regular Prodigy via AnimaLoraStudio) ---------------
+    prodigy_d_coef: float = 1.0
+    prodigy_safeguard_warmup: bool = True
+
+    # ---- InfoNoise (adaptive timestep sampling) -----------------------------
+    infonoise_enabled: bool = False
+    infonoise_K: int = 64
+    infonoise_N_warm: int = 0
+    infonoise_M: int = 100
+    infonoise_B: int = 256
+    infonoise_beta: float = 0.9
+    infonoise_N_min: int = 50
+
+    # ---- Loss weighting -----------------------------------------------------
+    # When != "none" this overrides the kohya-style min_snr_gamma plumbing.
+    loss_weighting: LossWeighting = "none"
+    weight_cap_ratio: float = 0.0  # 0 = disabled
+    detail_inv_t_min: float = 1.0
+    detail_inv_t_max: float = 5.0
+
+    # ---- Timestep sampling (AnimaLoraStudio dialect) ------------------------
+    # Their schema has its own set of values, separate from our kohya FlowMatch
+    # `training.timestep_sampling`. The mapper prefers this one when set.
+    timestep_sampling: AnimaTimestepSampling = "logit_normal"
+    timestep_shift: float = 3.0
+    timestep_mix_low_prob: float = 0.0  # mixed_* modes only
+    timestep_schedule_shift: float = 1.0  # post-sample σ schedule shift
+
+    # ---- LoKr per-layer rank override --------------------------------------
+    # regex -> rank, e.g. {"lora_unet_.*double.*": 16}
+    lora_reg_dims: Optional[Dict[str, int]] = None
+
+    # ---- Performance --------------------------------------------------------
+    kv_trim: bool = False  # Cross-attn KV trim to nearest bucket
+
+    # ---- Regularization dataset --------------------------------------------
+    reg_data_dir: Optional[str] = None
+    reg_caption: Optional[str] = None
+    reg_weight: float = 1.0
+
+
+# ---------------------------------------------------------------------------
 # Sample generation during training
 # ---------------------------------------------------------------------------
 SampleSampler = Literal[
@@ -289,6 +366,7 @@ class TrainConfig(BaseModel):
     optimizer: OptimizerSection = Field(default_factory=OptimizerSection)
     training: TrainingSection = Field(default_factory=TrainingSection)
     samples: SamplesSection = Field(default_factory=SamplesSection)
+    anima_lokr: AnimaLokrSection = Field(default_factory=AnimaLokrSection)
 
     # arbitrary additional kohya args the user might add via the "advanced" pane
     extra_args: Dict[str, Any] = Field(default_factory=dict)
@@ -307,6 +385,10 @@ class TrainConfig(BaseModel):
             net.pop("conv_alpha", None)
             ds = data.get("dataset") or {}
             ds.pop("max_token_length", None)
+        # `anima_lokr` is only consumed when (arch=anima, kind=lokr). Strip it
+        # from every other config so saved JSON / presets stay tidy.
+        if not (self.model.arch == "anima" and self.network.kind == "lokr"):
+            data.pop("anima_lokr", None)
         return data
 
 

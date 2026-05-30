@@ -45,6 +45,7 @@ def _read_env_paths() -> dict:
         "output_root": os.environ.get("LT_OUTPUT_ROOT", ""),
         "samples_root": os.environ.get("LT_SAMPLES_ROOT", ""),
         "sd_scripts_dir": os.environ.get("LT_SD_SCRIPTS_DIR", "/content/sd-scripts"),
+        "anima_studio_dir": os.environ.get("LT_ANIMA_STUDIO_DIR", "/content/AnimaLoraStudio"),
     }
 
 
@@ -77,6 +78,7 @@ def make_app() -> FastAPI:
         cfg.paths.output_root = init_paths["output_root"]
         cfg.paths.samples_root = init_paths["samples_root"]
         cfg.paths.sd_scripts_dir = init_paths["sd_scripts_dir"]
+        cfg.paths.anima_studio_dir = init_paths["anima_studio_dir"]
         if not cfg.samples.prompts:
             from .schemas import SamplePrompt
             cfg.samples.prompts = [
