@@ -92,6 +92,8 @@ class Trainer:
         self._workdir = workdir
         argv, env = build_command(cfg, workdir)
         self._argv = argv
+        cwd = (cfg.paths.anima_studio_dir if is_anima_lokr(cfg)
+               else cfg.paths.sd_scripts_dir)
 
         self.status = TrainStatus(
             state="starting",
@@ -102,11 +104,22 @@ class Trainer:
         await self._broadcast({"type": "status", "status": self.status.model_dump()})
         await self._broadcast({"type": "log", "stream": "system", "line": "$ " + " ".join(argv)})
 
+        # Preflight: uvloop turns a missing cwd / script / executable into a
+        # bare `FileNotFoundError: [Errno 2] No such file or directory` with no
+        # filename attached. Check the likely culprits up front so the UI gets
+        # an actionable message instead of an opaque ASGI traceback.
+        missing = self._preflight(argv, cwd, is_anima_lokr(cfg))
+        if missing:
+            self.status.state = "error"
+            self.status.message = missing
+            await self._broadcast({"type": "status", "status": self.status.model_dump()})
+            await self._broadcast({"type": "log", "stream": "system", "line": f"[preflight] {missing}"})
+            raise RuntimeError(missing)
+
         try:
             self.proc = await asyncio.create_subprocess_exec(
                 *argv,
-                cwd=(cfg.paths.anima_studio_dir if is_anima_lokr(cfg)
-                     else cfg.paths.sd_scripts_dir),
+                cwd=cwd,
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
@@ -122,6 +135,39 @@ class Trainer:
         await self._broadcast({"type": "status", "status": self.status.model_dump()})
 
         self._tail_task = asyncio.create_task(self._tail())
+
+    @staticmethod
+    def _preflight(argv: List[str], cwd: str, anima_lokr: bool) -> Optional[str]:
+        """Return a user-facing error message if the subprocess will fail to
+        spawn, else None. Checked in order: cwd → script file → executable.
+        """
+        import shutil
+        if not cwd:
+            return ("Папка для запуска не задана. Заполни "
+                    f"{'paths.anima_studio_dir' if anima_lokr else 'paths.sd_scripts_dir'} "
+                    "в настройках.")
+        if not os.path.isdir(cwd):
+            return (f"Папка `{cwd}` не существует. "
+                    + ("Похоже AnimaLoraStudio не склонирована. Запусти в Colab-ячейке:\n"
+                       "  `!git clone https://github.com/WalkingMeatAxolotl/AnimaLoraStudio /content/AnimaLoraStudio`"
+                       if anima_lokr else
+                       "Похоже sd-scripts не склонированы. Проверь paths.sd_scripts_dir."))
+        # argv[1] is the training script for the anima-lokr path
+        # (python interpreter + script). For kohya it's `accelerate launch <script>`.
+        if anima_lokr and len(argv) >= 2 and not os.path.isfile(argv[1]):
+            return (f"Тренировочный скрипт не найден: `{argv[1]}`. "
+                    "Проверь что AnimaLoraStudio клонирована полностью и что "
+                    "paths.anima_studio_dir указывает на корень репо.")
+        # Executable resolvable (absolute path exists, or it's in PATH).
+        exe = argv[0]
+        if os.path.isabs(exe):
+            if not os.path.isfile(exe):
+                return f"Исполняемый файл не найден: `{exe}`."
+        else:
+            if shutil.which(exe) is None:
+                hint = " (`pip install accelerate`)" if exe == "accelerate" else ""
+                return f"`{exe}` не найден в PATH{hint}."
+        return None
 
     async def _tail(self) -> None:
         assert self.proc is not None and self.proc.stdout is not None
