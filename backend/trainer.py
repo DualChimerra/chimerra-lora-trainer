@@ -10,8 +10,9 @@ import os
 import re
 import signal
 import time
+from collections import deque
 from pathlib import Path
-from typing import Optional, List, Callable, Awaitable
+from typing import Optional, List, Callable, Awaitable, Deque
 
 from .schemas import TrainConfig, TrainStatus
 from .config_builder import build_command, compute_total_steps
@@ -45,8 +46,8 @@ class Trainer:
         self.proc: Optional[asyncio.subprocess.Process] = None
         self.status = TrainStatus()
         self._log_subs: List[Callable[[dict], Awaitable[None]]] = []
-        self._log_buffer: List[dict] = []
-        self._log_buffer_max = 5000
+        # Ring buffer: maxlen handles trimming in O(1), no per-message slicing.
+        self._log_buffer: Deque[dict] = deque(maxlen=5000)
         self._tail_task: Optional[asyncio.Task] = None
         self._workdir: Optional[Path] = None
         self._argv: Optional[List[str]] = None
@@ -63,9 +64,7 @@ class Trainer:
 
     async def _broadcast(self, event: dict) -> None:
         event = {"ts": time.time(), **event}
-        self._log_buffer.append(event)
-        if len(self._log_buffer) > self._log_buffer_max:
-            self._log_buffer = self._log_buffer[-self._log_buffer_max:]
+        self._log_buffer.append(event)  # deque(maxlen) drops the oldest itself
         for fn in list(self._log_subs):
             try:
                 await fn(event)
@@ -73,9 +72,12 @@ class Trainer:
                 pass
 
     def snapshot(self) -> dict:
+        # deque has no slicing; take the last 300 without copying the whole buffer.
+        n = len(self._log_buffer)
+        tail = list(self._log_buffer)[max(0, n - 300):]
         return {
             "status": self.status.model_dump(),
-            "tail": self._log_buffer[-300:],
+            "tail": tail,
             "argv": self._argv,
         }
 
@@ -197,6 +199,8 @@ class Trainer:
                     self.status.total_steps = int(total)
                 if m.groupdict().get("epoch"):
                     self.status.epoch = int(m.group("epoch"))
+                if m.groupdict().get("total_epochs"):
+                    self.status.total_epochs = int(m.group("total_epochs"))
                 if m.group("loss"):
                     self.status.loss = float(m.group("loss"))
                 if m.group("lr"):

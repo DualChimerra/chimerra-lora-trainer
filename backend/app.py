@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from .schemas import TrainConfig, Preset
 from .state import StateStore
-from .filesystem import FileSystem
+from .filesystem import FileSystem, _safe_resolve
 from .trainer import Trainer
 from .config_builder import compute_total_steps, build_command
 
@@ -175,7 +175,6 @@ def make_app() -> FastAPI:
     @app.get("/api/fs/file")
     def api_fs_file(path: str):
         """Stream a file (image/model) under one of the allow-listed roots."""
-        from .filesystem import _safe_resolve
         resolved = _safe_resolve(path, fs.roots)
         if resolved is None or not resolved.is_file():
             raise HTTPException(404, "not found or not allowed")
@@ -193,7 +192,6 @@ def make_app() -> FastAPI:
 
     @app.get("/api/fs/thumb")
     def api_fs_thumb(path: str, size: int = 256):
-        from .filesystem import _safe_resolve
         import hashlib
         resolved = _safe_resolve(path, fs.roots)
         if resolved is None or not resolved.is_file():
@@ -442,6 +440,10 @@ def make_app() -> FastAPI:
 
         @app.get("/{name:path}")
         def static_passthrough(name: str):
+            # Unknown API paths must 404, not silently fall back to the SPA
+            # shell (which masks typos / removed endpoints as HTTP 200 HTML).
+            if name.startswith("api/") or name == "ws":
+                raise HTTPException(404, "not found")
             target = FRONTEND_DIR / name
             if target.is_file():
                 return FileResponse(str(target))

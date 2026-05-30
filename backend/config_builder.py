@@ -7,8 +7,6 @@ semantics — we only assemble what sd-scripts already accepts.
 from __future__ import annotations
 
 import os
-import sys
-import tempfile
 from pathlib import Path
 from typing import List, Tuple, Optional
 
@@ -178,12 +176,8 @@ def build_command(cfg: TrainConfig, workdir: Path) -> Tuple[List[str], dict]:
     (AnimaLoraStudio), not kohya. We delegate immediately and the rest of this
     function — the entire kohya path — is left untouched for every other combo.
     """
-    from .anima_lokr import is_anima_lokr, build_anima_lokr_command
-    if is_anima_lokr(cfg):
-        return build_anima_lokr_command(cfg, workdir)
-
     # Anima + LyCORIS LoKr: hand off to AnimaLoraStudio's engine. Kohya
-    # sd-scripts has no battle-tested LoKr path for the Anima DiT; their repo
+    # sd-scripts has no battle-tested LoKr path for the Anima DiT; that engine
     # drives lycoris.LycorisNetwork directly with an Anima-aware target preset.
     # Every other (arch, kind) pair continues through this function untouched.
     if is_anima_lokr(cfg):
