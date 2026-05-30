@@ -442,6 +442,10 @@ def make_app() -> FastAPI:
 
         @app.get("/{name:path}")
         def static_passthrough(name: str):
+            # Unknown API paths must 404, not silently fall back to the SPA
+            # shell (which masks typos / removed endpoints as HTTP 200 HTML).
+            if name.startswith("api/") or name == "ws":
+                raise HTTPException(404, "not found")
             target = FRONTEND_DIR / name
             if target.is_file():
                 return FileResponse(str(target))

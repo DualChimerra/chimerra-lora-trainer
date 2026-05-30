@@ -197,6 +197,8 @@ class Trainer:
                     self.status.total_steps = int(total)
                 if m.groupdict().get("epoch"):
                     self.status.epoch = int(m.group("epoch"))
+                if m.groupdict().get("total_epochs"):
+                    self.status.total_epochs = int(m.group("total_epochs"))
                 if m.group("loss"):
                     self.status.loss = float(m.group("loss"))
                 if m.group("lr"):

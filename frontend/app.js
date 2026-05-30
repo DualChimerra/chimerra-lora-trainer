@@ -81,13 +81,22 @@ function cleanForExport(cfg) {
         delete c.model.vae;
         delete c.model.v_parameterization;
         delete c.model.clip_skip;
-        // SDXL-only training noise/loss fields
-        const tdel = [
-            'min_snr_gamma', 'noise_offset', 'adaptive_noise_scale',
-            'multires_noise_iterations', 'multires_noise_discount',
-            'ip_noise_gamma', 'debiased_estimation_loss', 'zero_terminal_snr',
-            'noise_offset_random_strength', 'ip_noise_gamma_random_strength',
-        ];
+        // SDXL-only training noise/loss fields. The Anima+LoKr engine reuses a
+        // handful of these (min_snr_gamma, noise_offset, multires_noise_*) via
+        // its dedicated panel, so keep them for that combo — otherwise saved
+        // presets / exports would silently drop the user's loss/noise settings.
+        const isLokr = c.network?.kind === 'lokr';
+        const tdel = isLokr
+            ? [
+                'adaptive_noise_scale', 'ip_noise_gamma', 'debiased_estimation_loss',
+                'zero_terminal_snr', 'noise_offset_random_strength', 'ip_noise_gamma_random_strength',
+            ]
+            : [
+                'min_snr_gamma', 'noise_offset', 'adaptive_noise_scale',
+                'multires_noise_iterations', 'multires_noise_discount',
+                'ip_noise_gamma', 'debiased_estimation_loss', 'zero_terminal_snr',
+                'noise_offset_random_strength', 'ip_noise_gamma_random_strength',
+            ];
         tdel.forEach(k => delete c.training[k]);
     } else {
         // Anima-only model fields
@@ -1540,7 +1549,10 @@ const SectionPresets = ({ cfg, applyPatch, replaceCfg, presets, refresh }) => {
             const parsed = JSON.parse(text);
             // Either a TrainConfig or a Preset (with .config inside)
             const next = parsed.config && parsed.created_at ? parsed.config : parsed;
-            replaceCfg(next);
+            // Deep-merge over the current config so a partial / cleaned JSON
+            // (e.g. an arch-stripped export) can't leave required sections
+            // undefined and crash the render.
+            replaceCfg(deepMerge(cfg, next));
             toast('ok', 'Конфиг импортирован');
         } catch (e) { toast('err', 'Не удалось разобрать JSON: ' + e.message); }
     };
@@ -1795,7 +1807,6 @@ const ANIMA_LOKR_DEFAULTS = [
     ['training.timestep_sampling',  'shift',        'logit_normal'],
     ['training.discrete_flow_shift',3.0,            3.0],
     ['dataset.flip_aug',            false,          true],
-    ['dataset.shuffle_caption',     true,           true],
     ['dataset.cache_latents',       true,           true],
     ['dataset.cache_latents_to_disk', true,         true],
     ['dataset.max_data_loader_n_workers', 8,        8],            // Colab: keep our higher default
@@ -1817,6 +1828,10 @@ const App = () => {
     const [scanResult, setScanResult] = useState([]);
     const [dirty, setDirty] = useState(false);
     const saveTimer = useRef(null);
+    // Latest cfg for callbacks that must NOT re-subscribe on every edit (the
+    // WebSocket handler). Updated on every render; read via .current.
+    const cfgRef = useRef(null);
+    cfgRef.current = cfg;
 
     // initial load
     useEffect(() => { (async () => {
@@ -1854,28 +1869,17 @@ const App = () => {
             });
             // when training emits a save line, refresh outputs/samples
             if (ev.type === 'log' && /saving (checkpoint|state)|saved model|saving images/i.test(ev.line || '')) {
-                if (cfg) { refreshOutputs(cfg); refreshSamples(cfg); }
+                const c = cfgRef.current;
+                if (c) { refreshOutputs(c); refreshSamples(c); }
             }
             // sample generation lags behind the "saving checkpoint" line by 20-60s,
             // so also kick off a delayed refresh when kohya announces generation.
             if (ev.type === 'log' && /generating sample images/i.test(ev.line || '')) {
-                if (cfg) setTimeout(() => { refreshSamples(cfg); }, 45000);
+                setTimeout(() => { const c = cfgRef.current; if (c) refreshSamples(c); }, 45000);
             }
         });
         return close;
-    }, [cfg]);
-
-    // While training is running, poll samples/outputs periodically so the
-    // gallery fills up even if we miss the log triggers above.
-    useEffect(() => {
-        if (status.state !== 'running' && status.state !== 'starting') return;
-        if (!cfg) return;
-        const id = setInterval(() => {
-            refreshSamples(cfg);
-            refreshOutputs(cfg);
-        }, 20000);
-        return () => clearInterval(id);
-    }, [status.state, cfg]);
+    }, []);
 
     // debounce save
     const set = useCallback((path, value) => {
